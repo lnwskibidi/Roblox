@@ -29,14 +29,14 @@ local Library = {
 
     HudRegistry = {};
 
-    FontColor = Color3.fromRGB(255, 255, 255);  
-    MainColor = Color3.fromRGB(0, 0, 0);        
-    BackgroundColor = Color3.fromRGB(0, 0, 0);  
-    AccentColor = Color3.fromRGB(255, 255, 255); 
-    OutlineColor = Color3.fromRGB(255, 255, 255);
-    RiskColor = Color3.fromRGB(255, 0, 0); 
+    FontColor = Color3.fromRGB(230, 230, 230);
+    MainColor = Color3.fromRGB(20, 20, 20);
+    BackgroundColor = Color3.fromRGB(15, 15, 15);
+    AccentColor = Color3.fromRGB(180, 180, 180);
+    OutlineColor = Color3.fromRGB(100, 100, 100);
+    RiskColor = Color3.fromRGB(255, 50, 50);
 
-    Black = Color3.new(0.10, 0.10, 0.10);
+    Black = Color3.fromRGB(25, 25, 25);
     Font = Enum.Font.SourceSansBold;
 
     OpenedFrames = {};
