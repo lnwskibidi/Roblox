@@ -85,7 +85,7 @@ coroutine.resume(coroutine.create(function()
             BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
             BV.Parent = Football
 
-            Football.CFrame = Goal.CFrame
+            Football.CFrame = Goal.CFrame * CFrame.new(0, 14, math.random(-20, 20))
 
             task.delay(0.1, function()
                 BV:Destroy()
