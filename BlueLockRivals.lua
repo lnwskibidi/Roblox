@@ -14,10 +14,6 @@ local function IsInGame()
     return GameValues.State.Value == "Playing"
 end
 
-local function IsScored()
-    return GameValues.Scored.Value
-end
-
 local function IsVisitor()
     return LocalPlayer.Team.Name == "Visitor"
 end
@@ -33,13 +29,13 @@ local function JoinGame()
 end
 
 local function StealBall()
-    if not IsInGame() or IsScored() then return end
+    if not IsInGame() then return end
     local LocalCharacter = LocalPlayer.Character
     local LocalHumanoidRootPart = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
     local Football = workspace:FindFirstChild("Football")
 
-    if LocalHumanoidRootPart and Football and not Football.Anchored and Football.Char.Value ~= LocalPlayer.Character then
-        LocalHumanoidRootPart.CFrame = CFrame.new(Football.Position.X, 9, Football.Position.Z)
+    if LocalHumanoidRootPart and Football and Football.Char.Value ~= LocalPlayer.Character then
+        LocalHumanoidRootPart.CFrame = Football.CFrame
     end
 
     for _, OtherPlayer in ipairs(Players:GetPlayers()) do
@@ -49,7 +45,7 @@ local function StealBall()
             local OtherHRP = OtherCharacter and OtherCharacter:FindFirstChild("HumanoidRootPart")
             
             if OtherFootball and OtherHRP and LocalHumanoidRootPart then
-                LocalHumanoidRootPart.CFrame = OtherFootball.CFrame * CFrame.new(0, 3, 0)
+                LocalHumanoidRootPart.CFrame = OtherFootball.CFrame
                 SlideRemote:FireServer()
                 break
             end
