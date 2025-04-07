@@ -1,7 +1,5 @@
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-_G.AutoStocker = _G.AutoStocker or false
-
 local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
