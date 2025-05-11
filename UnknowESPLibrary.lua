@@ -1,41 +1,43 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local ESP = {
-    Enabled = true,
+    Enabled = false,
     Settings = {
-        RemoveOnDeath = true,
+        RemoveOnDeath = false,
         MaxDistance = 300,
         MaxBoxSize = Vector3.new(15, 15, 0),
-        DestroyOnRemove = true,
+        DestroyOnRemove = false,
         TeamColors = false,
         TeamBased = false,
         BoxTopOffset = Vector3.new(0, 1, 0),
         
         Boxes = {
-            Enabled = true,
+            Enabled = false,
             Color = Color3.new(1, 0, 1),
             Thickness = 1,
         },
         Names = {
             Distance = true,
             Health = true,
-            Enabled = true,
+            Enabled = false,
             Resize = true,
             ResizeWeight = 0.05,
             Color = Color3.new(1, 1, 1),
-            Size = 18,
-            Font = 1,
+            Size = 14,
+            Font = 2,
             Center = true,
             Outline = true,
         },
         Tracers = {
-            Enabled = true,
+            Enabled = false,
             Thickness = 0,
             Color = Color3.new(1, 0, 1),
+            At = "Mouse", -- "Mouse", "Bottom", "Top", "Center"
         },
         Chams = {
-            Enabled = true,
+            Enabled = false,
             Color = Color3.new(1, 0.4, 1),
             Transparency = 0.5,
             OutlineColor = Color3.new(1, 0, 1),
@@ -43,7 +45,7 @@ local ESP = {
             DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
         },
         Skeleton = {
-            Enabled = true,
+            Enabled = false,
             Color = Color3.new(1, 1, 1),
             Thickness = 1,
             Connections = {
@@ -300,7 +302,6 @@ function Object:New(Model, ExtraInfo)
         NewObject.Objects.Chams.FillTransparency = Settings.Chams.Transparency
         NewObject.Objects.Chams.OutlineColor = Settings.Chams.OutlineColor
         NewObject.Objects.Chams.OutlineTransparency = Settings.Chams.OutlineTransparency
-        NewObject.Objects.Chams.FillType = Settings.Chams.FillType
         NewObject.Objects.Chams.DepthMode = Settings.Chams.DepthMode
         NewObject.Objects.Chams.Adornee = Model
         NewObject.Objects.Chams.Parent = game.CoreGui
@@ -333,6 +334,7 @@ function Object:New(Model, ExtraInfo)
     return NewObject
 end
 
+-- FIXED: Modified GetQuad function to properly calculate box corners that always face the camera
 function Object:GetQuad()
     local RenderSettings = self.RenderSettings
     local GlobalSettings = self.GlobalSettings
@@ -341,32 +343,60 @@ function Object:GetQuad()
     local BoxTopOffset = GetValue(RenderSettings, GlobalSettings, "BoxTopOffset")
     
     local Model = self.Model
+    local Camera = workspace.CurrentCamera
     local Pivot = Model:GetPivot()
-    local BoxPosition, Size = Model:GetBoundingBox()
     
+    -- Apply offset
     Pivot = Pivot * ESP:GetOffset(Model)
     
-    Size = Size * Vector3.new(1, 1, 0)
-
+    -- Get the character size from bounding box
+    local _, Size = Model:GetBoundingBox()
+    
+    -- Clamp the size based on MaxBoxSize
     local X, Y = math.clamp(Size.X, 1, MaxSize.X) / 2, math.clamp(Size.Y, 1, MaxSize.Y) / 2
     
-    local PivotVector, PivotOnScreen = (ESP:GetScreenPosition(Pivot.Position))
-    local BoxTop = ESP:GetScreenPosition((Pivot * CFrame.new(0, Y, 0)).Position + (BoxTopOffset))
-    local BoxBottom = ESP:GetScreenPosition((Pivot * CFrame.new(0, -Y, 0)).Position)
-    local TopRight, TopRightOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(-X, Y, 0)).Position)
-    local TopLeft, TopLeftOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(X, Y, 0)).Position)
-    local BottomLeft, BottomLeftOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(X, -Y, 0)).Position)
-    local BottomRight, BottomRightOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(-X, -Y, 0)).Position)
+    -- Get the position of the model on screen
+    local Position, IsOnScreen = ESP:GetScreenPosition(Pivot.Position)
     
+    -- Check if any part of the model is visible
+    if not IsOnScreen then
+        return false
+    end
+    
+    -- Calculate the camera's viewing direction to the model
+    local CameraPosition = Camera.CFrame.Position
+    local LookVector = (Pivot.Position - CameraPosition).Unit
+    
+    -- Calculate camera-aligned right and up vectors
+    local Right = Camera.CFrame.RightVector
+    local Up = Camera.CFrame.UpVector
+    
+    -- Calculate the corners of the box in 3D space, aligned with the camera view
+    local TopRight = Pivot.Position + (Right * X) + (Up * Y)
+    local TopLeft = Pivot.Position - (Right * X) + (Up * Y)
+    local BottomLeft = Pivot.Position - (Right * X) - (Up * Y)
+    local BottomRight = Pivot.Position + (Right * X) - (Up * Y)
+    
+    -- Convert 3D positions to screen positions
+    local TopRightPos, TopRightOnScreen = ESP:GetScreenPosition(TopRight)
+    local TopLeftPos, TopLeftOnScreen = ESP:GetScreenPosition(TopLeft)
+    local BottomLeftPos, BottomLeftOnScreen = ESP:GetScreenPosition(BottomLeft)
+    local BottomRightPos, BottomRightOnScreen = ESP:GetScreenPosition(BottomRight)
+    
+    -- Calculate additional points for other features
+    local BoxTop = ESP:GetScreenPosition(Pivot.Position + (Up * Y) + BoxTopOffset)
+    local BoxBottom = ESP:GetScreenPosition(Pivot.Position - (Up * Y))
+    
+    -- Check if any corner is on screen
     if TopRightOnScreen or TopLeftOnScreen or BottomLeftOnScreen or BottomRightOnScreen then
         local Positions = {
             BoxBottom = BoxBottom,
-            Pivot = PivotVector,
+            Pivot = Position,
             BoxTop = BoxTop,
-            TopRight = TopRight,
-            TopLeft = TopLeft,
-            BottomLeft = BottomLeft,
-            BottomRight = BottomRight,
+            TopRight = TopRightPos,
+            TopLeft = TopLeftPos,
+            BottomLeft = BottomLeftPos,
+            BottomRight = BottomRightPos,
         }
     
         return Positions, true
@@ -449,12 +479,25 @@ function Object:DrawTracer(Quad)
     local TeamColors = GetValue(RenderTracers, GlobalTracers, "TeamColors")
     local Color = GetValue(RenderTracers, GlobalTracers, "Color")
     local Thickness = GetValue(RenderTracers, GlobalTracers, "Thickness")
+
+    local At
+    if ESP.Settings.Tracers.At == "Mouse" then
+        At = UserInputService:GetMouseLocation()
+    elseif ESP.Settings.Tracers.At == "Bottom" then
+        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 1)
+    elseif ESP.Settings.Tracers.At == "Top" then
+        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 0)
+    elseif ESP.Settings.Tracers.At == "Center" then
+        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 0.5)
+    else
+        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 1)
+    end
     
     local Properties = {
         Visible = true,
         Color = TeamColors and ESP:GetTeamColor(self.Model) or Color,
         Thickness = Thickness,
-        From = workspace.CurrentCamera.ViewportSize * Vector2.new(.5, 1),
+        From = At,
         To = Quad.BoxBottom,
     }
     
@@ -633,7 +676,7 @@ function Object:Refresh()
     end
 end
 
-RunService.Stepped:Connect(function()
+RunService.RenderStepped:Connect(function()
     for i, Object in next, ESP.Objects do
         Object:Refresh()
     end
