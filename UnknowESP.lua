@@ -1,8 +1,8 @@
 local Workspace, RunService, Players, CoreGui, Lighting = cloneref(game:GetService("Workspace")), cloneref(game:GetService("RunService")), cloneref(game:GetService("Players")), game:GetService("CoreGui"), cloneref(game:GetService("Lighting"))
 
 local ESP = {
-    Enabled = true,
-    TeamCheck = true,
+    Enabled = false,
+    TeamCheck = false,
     MaxDistance = 200,
     FontSize = 11,
     FadeOut = {
@@ -17,7 +17,7 @@ local ESP = {
     },
     Drawing = {
         Chams = {
-            Enabled  = true,
+            Enabled  = false,
             Thermal = true,
             FillRGB = Color3.fromRGB(119, 120, 255),
             Fill_Transparency = 100,
@@ -26,19 +26,19 @@ local ESP = {
             VisibleCheck = true,
         },
         Names = {
-            Enabled = true,
+            Enabled = false,
             RGB = Color3.fromRGB(255, 255, 255),
         },
         Flags = {
             Enabled = true,
         },
         Distances = {
-            Enabled = true, 
+            Enabled = false, 
             Position = "Text",
             RGB = Color3.fromRGB(255, 255, 255),
         },
         Healthbar = {
-            Enabled = true,  
+            Enabled = false,  
             HealthText = true, Lerp = false, HealthTextRGB = Color3.fromRGB(119, 120, 255),
             Width = 2.5,
             Gradient = true, GradientRGB1 = Color3.fromRGB(200, 0, 0), GradientRGB2 = Color3.fromRGB(60, 60, 125), GradientRGB3 = Color3.fromRGB(119, 120, 255), 
@@ -49,16 +49,16 @@ local ESP = {
             Gradient = false, GradientRGB1 = Color3.fromRGB(119, 120, 255), GradientRGB2 = Color3.fromRGB(0, 0, 0), 
             GradientFill = true, GradientFillRGB1 = Color3.fromRGB(119, 120, 255), GradientFillRGB2 = Color3.fromRGB(0, 0, 0), 
             Filled = {
-                Enabled = true,
+                Enabled = false,
                 Transparency = 0.75,
                 RGB = Color3.fromRGB(0, 0, 0),
             },
             Full = {
-                Enabled = true,
+                Enabled = false,
                 RGB = Color3.fromRGB(255, 255, 255),
             },
             Corner = {
-                Enabled = true,
+                Enabled = false,
                 RGB = Color3.fromRGB(255, 255, 255),
             },
         };
