@@ -40,7 +40,6 @@ local ESP = {
             Transparency = 0.5,
             OutlineColor = Color3.new(1, 0, 1),
             OutlineTransparency = 0.8,
-            FillType = Enum.FillType.Solid,
             DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
         },
         Skeleton = {
