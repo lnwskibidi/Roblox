@@ -1,772 +1,766 @@
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+--[[
+    Customizable Roblox ESP Library
+    Features:
+    - Name ESP
+    - Box ESP
+    - Healthbar ESP
+    - Distance ESP
+    - Chams (Player highlighting)
+    - Skeleton ESP
+    - Tracer ESP
+    
+    Instructions:
+    1. Execute this script in your exploit
+    2. Use the ESP.toggle functions to enable/disable features
+    3. Customize colors and settings as needed
+--]]
 
 local ESP = {
-    Enabled = false,
-    Settings = {
-        RemoveOnDeath = false,
-        MaxDistance = 300,
-        MaxBoxSize = Vector3.new(15, 15, 0),
-        DestroyOnRemove = false,
-        TeamColors = false,
-        TeamBased = false,
-        BoxTopOffset = Vector3.new(0, 1, 0),
-        
-        Boxes = {
-            Enabled = false,
-            Color = Color3.new(1, 0, 1),
-            Thickness = 1,
-        },
-        Names = {
-            Distance = true,
-            Health = true,
-            Enabled = false,
-            Resize = true,
-            ResizeWeight = 0.05,
-            Color = Color3.new(1, 1, 1),
-            Size = 14,
-            Font = 2,
-            Center = true,
-            Outline = true,
-        },
-        Tracers = {
-            Enabled = false,
-            Thickness = 0,
-            Color = Color3.new(1, 0, 1),
-            At = "Mouse", -- "Mouse", "Bottom", "Top", "Center"
-        },
-        Chams = {
-            Enabled = false,
-            Color = Color3.new(1, 0.4, 1),
-            Transparency = 0.5,
-            OutlineColor = Color3.new(1, 0, 1),
-            OutlineTransparency = 0.8,
-            DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
-        },
-        Skeleton = {
-            Enabled = false,
-            Color = Color3.new(1, 1, 1),
-            Thickness = 1,
-            Connections = {
-                {"Head", "UpperTorso"},
-                {"UpperTorso", "LowerTorso"},
-                {"UpperTorso", "RightUpperArm"},
-                {"RightUpperArm", "RightLowerArm"},
-                {"RightLowerArm", "RightHand"},
-                {"UpperTorso", "LeftUpperArm"},
-                {"LeftUpperArm", "LeftLowerArm"},
-                {"LeftLowerArm", "LeftHand"},
-                {"LowerTorso", "RightUpperLeg"},
-                {"RightUpperLeg", "RightLowerLeg"},
-                {"RightLowerLeg", "RightFoot"},
-                {"LowerTorso", "LeftUpperLeg"},
-                {"LeftUpperLeg", "LeftLowerLeg"},
-                {"LeftLowerLeg", "LeftFoot"},
-            },
-            R6Connections = {
-                {"Head", "Torso"},
-                {"Torso", "Right Arm"},
-                {"Torso", "Left Arm"},
-                {"Torso", "Right Leg"},
-                {"Torso", "Left Leg"},
-            }
-        }
-    },
-    Objects = {}
+    Enabled = true,
+    
+    -- Feature toggles
+    ShowName = true,
+    ShowBox = true,
+    ShowHealth = true,
+    ShowDistance = true,
+    ShowChams = true,
+    ShowSkeleton = true,
+    ShowTracer = true,
+    
+    -- Customization
+    BoxColor = Color3.fromRGB(255, 0, 0),
+    NameColor = Color3.fromRGB(255, 255, 255),
+    HealthColor = Color3.fromRGB(0, 255, 0),
+    DistanceColor = Color3.fromRGB(255, 255, 255),
+    ChamsColor = Color3.fromRGB(255, 0, 0),
+    ChamsTransparency = 0.5,
+    SkeletonColor = Color3.fromRGB(255, 255, 255),
+    TracerColor = Color3.fromRGB(255, 0, 0),
+    
+    -- Settings
+    TextSize = 14,
+    BoxThickness = 1,
+    HealthbarThickness = 1,
+    SkeletonThickness = 1,
+    TracerThickness = 1,
+    TracerOrigin = "Bottom", -- "Bottom", "Center", "Mouse"
+    
+    -- Private properties
+    _players = {},
+    _connections = {},
+    _drawings = {}
 }
 
--- Add functions to toggle features and update settings
-function ESP:Toggle(enabled)
-    self.Enabled = enabled
-    
-    -- If turning off, clear all drawings
-    if not enabled then
-        for _, object in pairs(self.Objects) do
-            object:ClearDrawings()
-        end
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Check if drawing library is available (required for ESP)
+local drawingSupported = pcall(function() return Drawing.new end)
+if not drawingSupported then
+    warn("ESP Library: Drawing API not available in your exploit!")
+    return
+end
+
+-- Create container for ESP
+local espFolder = Instance.new("Folder")
+espFolder.Name = "ESP_Elements"
+espFolder.Parent = CoreGui
+
+-- Utility functions
+local function create(class, properties)
+    local instance = Drawing.new(class)
+    for property, value in pairs(properties) do
+        instance[property] = value
     end
+    return instance
 end
 
-function ESP:ToggleBox(enabled)
-    self.Settings.Boxes.Enabled = enabled
+local function worldToScreen(position)
+    local screenPosition, onScreen = Camera:WorldToScreenPoint(position)
+    return Vector2.new(screenPosition.X, screenPosition.Y), onScreen and screenPosition.Z > 0
 end
 
-function ESP:ToggleNames(enabled)
-    self.Settings.Names.Enabled = enabled
-end
-
-function ESP:ToggleTracers(enabled)
-    self.Settings.Tracers.Enabled = enabled
-end
-
-function ESP:ToggleChams(enabled)
-    self.Settings.Chams.Enabled = enabled
+local function getPlayerBoundingBox(character)
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
     
-    -- Apply changes to existing objects
-    for _, object in pairs(self.Objects) do
-        if object.Objects.Chams then
-            if enabled then
-                object:UpdateChams()
-            else
-                object.Objects.Chams.Enabled = false
-            end
-        elseif enabled then
-            -- Create chams for existing objects that don't have them
-            object.Objects.Chams = Instance.new("Highlight")
-            object.Objects.Chams.FillColor = self.Settings.Chams.Color
-            object.Objects.Chams.FillTransparency = self.Settings.Chams.Transparency
-            object.Objects.Chams.OutlineColor = self.Settings.Chams.OutlineColor
-            object.Objects.Chams.OutlineTransparency = self.Settings.Chams.OutlineTransparency
-            object.Objects.Chams.DepthMode = self.Settings.Chams.DepthMode
-            object.Objects.Chams.Adornee = object.Model
-            object.Objects.Chams.Parent = game.CoreGui
-        end
-    end
-end
-
-function ESP:ToggleSkeleton(enabled)
-    self.Settings.Skeleton.Enabled = enabled
+    local size = character:GetExtentsSize()
+    local cf = hrp.CFrame
     
-    -- Apply changes to existing objects
-    for _, object in pairs(self.Objects) do
-        if enabled and next(object.Objects.Skeleton) == nil then
-            -- Create skeleton lines for objects that don't have them
-            local Humanoid = object.Model:FindFirstChildOfClass("Humanoid")
-            if Humanoid then
-                local Connections = Humanoid.RigType == Enum.HumanoidRigType.R6 and self.Settings.Skeleton.R6Connections or self.Settings.Skeleton.Connections
-                
-                for _, Connection in ipairs(Connections) do
-                    object.Objects.Skeleton[Connection[1] .. "-" .. Connection[2]] = Draw("Line", {
-                        Thickness = self.Settings.Skeleton.Thickness,
-                        Color = self.Settings.Skeleton.Color,
-                        Visible = false
-                    })
-                end
-            end
-        end
-    end
-end
-
-local function Draw(Type, Properties)
-    local Object = Drawing.new(Type)
+    local topRight = cf * CFrame.new(size.X/2, size.Y/2, 0)
+    local topLeft = cf * CFrame.new(-size.X/2, size.Y/2, 0)
+    local bottomRight = cf * CFrame.new(size.X/2, -size.Y/2, 0)
+    local bottomLeft = cf * CFrame.new(-size.X/2, -size.Y/2, 0)
     
-    for Property, Value in next, Properties or {} do
-        Object[Property] = Value
-    end
-    
-    return Object
-end
-
-function ESP:GetScreenPosition(Position)
-    local Position = typeof(Position) ~= "CFrame" and Position or Position.Position
-    local ScreenPos, IsOnScreen = workspace.CurrentCamera:WorldToViewportPoint(Position)
-    
-    return Vector2.new(ScreenPos.X, ScreenPos.Y), IsOnScreen
-end
-
-function ESP:GetDistance(Position)
-    local Magnitude = (workspace.CurrentCamera.CFrame.Position - Position).Magnitude
-    local Metric = Magnitude * 0.28
-    
-    return math.round(Metric)
-end
-
-function ESP:GetHealth(Model)
-    local Humanoid = Model:FindFirstChildOfClass("Humanoid")
-    
-    if Humanoid then
-        return Humanoid.Health, Humanoid.MaxHealth, (Humanoid.Health / Humanoid.MaxHealth) * 100
-    end
-    
-    return 100, 100, 100
-end
-
-function ESP:GetPlayerFromCharacter(Model)
-    return Players:GetPlayerFromCharacter(Model)
-end
-
-function ESP:GetTeam(Model)
-    local Player = ESP:GetPlayerFromCharacter(Model)
-    return Player and Player.Team or nil
-end
-
-function ESP:GetPlayerTeam(Player)
-    return Player and Player.Team
-end
-
-function ESP:IsHostile(Model)
-    local Player = ESP:GetPlayerFromCharacter(Model)
-    local MyTeam = ESP:GetPlayerTeam(Players.LocalPlayer)
-    local TheirTeam = ESP:GetPlayerTeam(Player)
-    
-    return (MyTeam ~= TheirTeam)
-end
-
-function ESP:GetTeamColor(Model)
-    local Team
-    
-    if Model:IsA("Model") then
-        Team = ESP:GetTeam(Model)
-    elseif Model:IsA("Player") then
-        Team = ESP:GetPlayerTeam(Model)
-    end
-    
-    return Team and Team.TeamColor.Color or Color3.new(1, 0, 0)
-end
-
-function ESP:GetOffset(Model)
-    local Humanoid = Model:FindFirstChild("Humanoid")
-    
-    if Humanoid and Humanoid.RigType == Enum.HumanoidRigType.R6 then
-        return CFrame.new(0, -1.75, 0)
-    end
-    
-    return CFrame.new(0, 0, 0)
-end
-
-function ESP:CharacterAdded(Player)
-    return Player.CharacterAdded
-end
-
-function ESP:GetCharacter(Player)
-    return Player.Character
-end
-
-local function Validate(Child, Type, ClassName, ExpectedName)
-    return not (Type or ClassName or ExpectedName) or (not ExpectedName or (ExpectedName and Child.Name == ExpectedName)) and (not ClassName or (ClassName and Child.ClassName == ClassName)) and (not Type or (Type and Child:IsA(Type)))
-end
-
-function ESP:AddListener(Model, Validator, Settings)
-    local Descendants = Settings.Descendants
-    local Type, ClassName, ExpectedName = Settings.Type, Settings.ClassName, Settings.ExpectedName
-    local ExtraSettings = Settings.Custom or {}
-    
-    local function ValidCheck(Child)
-        if typeof(Validator) == "function" and Validator(Child) or not Validator then
-            if Validate(Child, Type, ClassName, ExpectedName) then
-                ESP.Object:New(Child, ExtraSettings)
-            end
-        end
-    end
-    
-    local Connection = Descendants and Model.DescendantAdded or Model.ChildAdded
-    local ObjectsToCheck = Descendants and Model.GetDescendants or Model.GetChildren
-    
-    Connection:Connect(function(Child)
-        task.spawn(ValidCheck, Child)
-    end)
-    
-    for i, Child in next, ObjectsToCheck(Model) do
-        task.spawn(ValidCheck, Child)
-    end
-end
-
-local Object = {}
-Object.__index = Object
-
-ESP.Object = Object
-
-local function Clone(Table)
-    local Ret = {}
-    
-    for i,v in next, Table do
-        if typeof(v) == "table" then
-            v = Clone(v)
-        end
-        
-        Ret[i] = v
-    end
-    
-    return Ret
-end
-
-local function GetValue(Local, Global, Name)
-    local GlobalVal = Global[Name]
-    local LocalVal = Local[Name]
-    
-    return LocalVal or ((LocalVal == nil or typeof(LocalVal) ~= "boolean") and GlobalVal)
-end
-
-function Object:New(Model, ExtraInfo)
-    if not Model then
-        return
-    end
-    
-    local Settings = ESP.Settings
-    
-    local NewObject = {
-        Connections = {},
-        RenderSettings = {
-            Boxes = {},
-            Tracers = {},
-            Names = {},
-            Chams = {},
-            Skeleton = {}
-        },
-        GlobalSettings = Settings,
-        Model = Model,
-        Name = Model.Name,
-        
-        Objects = {
-            Box = {
-                Color = Settings.Boxes.Color,
-                Thickness = Settings.Boxes.Thickness,
-            },
-            
-            Name = {
-                Color = Settings.Names.Color,
-                Outline = Settings.Names.Outline,
-                Text = Model.Name,
-                Size = Settings.Names.Size,
-                Font = Settings.Names.Font,
-                Center = Settings.Names.Center,
-            },
-            
-            Tracer = {
-                Thickness = Settings.Tracers.Thickness,
-                Color = Settings.Tracers.Color,
-            },
-            
-            Chams = nil,
-            
-            Skeleton = {}
-        },
+    local corners = {
+        topRight = worldToScreen(topRight.Position),
+        topLeft = worldToScreen(topLeft.Position),
+        bottomRight = worldToScreen(bottomRight.Position),
+        bottomLeft = worldToScreen(bottomLeft.Position)
     }
     
-    for Property, Value in next, ExtraInfo or {} do
-        if Property ~= "Settings" then
-            NewObject[Property] = Value
-        else
-            for Name, Table in next, Value do
-                for Property, Value in next, Table do
-                    NewObject.RenderSettings[Name][Property] = Value
-                end
-            end
+    return corners
+end
+
+local function getLimbPositions(character)
+    local limbs = {}
+    
+    -- Get key limb parts
+    local head = character:FindFirstChild("Head")
+    local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    local leftArm = character:FindFirstChild("LeftUpperArm") or character:FindFirstChild("Left Arm")
+    local rightArm = character:FindFirstChild("RightUpperArm") or character:FindFirstChild("Right Arm")
+    local leftLeg = character:FindFirstChild("LeftUpperLeg") or character:FindFirstChild("Left Leg")
+    local rightLeg = character:FindFirstChild("RightUpperLeg") or character:FindFirstChild("Right Leg")
+    local leftForearm = character:FindFirstChild("LeftLowerArm")
+    local rightForearm = character:FindFirstChild("RightLowerArm")
+    local leftShin = character:FindFirstChild("LeftLowerLeg")
+    local rightShin = character:FindFirstChild("RightLowerLeg")
+    local leftFoot = character:FindFirstChild("LeftFoot")
+    local rightFoot = character:FindFirstChild("RightFoot")
+    
+    -- Create connections list (R15/R6 compatible)
+    local connections = {}
+    
+    if head and torso then
+        table.insert(connections, {head, torso})
+    end
+    
+    if torso then
+        if leftArm then table.insert(connections, {torso, leftArm}) end
+        if rightArm then table.insert(connections, {torso, rightArm}) end
+        if leftLeg then table.insert(connections, {torso, leftLeg}) end
+        if rightLeg then table.insert(connections, {torso, rightLeg}) end
+    end
+    
+    if leftArm and leftForearm then table.insert(connections, {leftArm, leftForearm}) end
+    if rightArm and rightForearm then table.insert(connections, {rightArm, rightForearm}) end
+    if leftLeg and leftShin then table.insert(connections, {leftLeg, leftShin}) end
+    if rightLeg and rightShin then table.insert(connections, {rightLeg, rightShin}) end
+    if leftShin and leftFoot then table.insert(connections, {leftShin, leftFoot}) end
+    if rightShin and rightFoot then table.insert(connections, {rightShin, rightFoot}) end
+    
+    -- Convert to screen positions
+    for _, connection in ipairs(connections) do
+        local part1, part2 = connection[1], connection[2]
+        local pos1, onScreen1 = worldToScreen(part1.Position)
+        local pos2, onScreen2 = worldToScreen(part2.Position)
+        
+        if onScreen1 and onScreen2 then
+            table.insert(limbs, {pos1, pos2})
         end
     end
     
-    NewObject = setmetatable(NewObject, Object)
-    ESP.Objects[Model] = NewObject
+    return limbs
+end
 
-    NewObject.Objects.Box = Draw("Quad", NewObject.Objects.Box)
-    NewObject.Objects.Name = Draw("Text", NewObject.Objects.Name)
-    NewObject.Objects.Tracer = Draw("Line", NewObject.Objects.Tracer)
+local function getDistance(character)
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return 0 end
     
-    local Humanoid = Model:FindFirstChildOfClass("Humanoid")
-    local SkeletonSettings = Settings.Skeleton
+    local playerPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not playerPos then return 0 end
     
-    if SkeletonSettings.Enabled then
-        local Connections = Humanoid and Humanoid.RigType == Enum.HumanoidRigType.R6 and SkeletonSettings.R6Connections or SkeletonSettings.Connections
-        
-        for _, Connection in ipairs(Connections) do
-            NewObject.Objects.Skeleton[Connection[1] .. "-" .. Connection[2]] = Draw("Line", {
-                Thickness = SkeletonSettings.Thickness,
-                Color = SkeletonSettings.Color,
-                Visible = false
+    return math.floor((hrp.Position - playerPos.Position).Magnitude)
+end
+
+local function getTracerOrigin()
+    if ESP.TracerOrigin == "Bottom" then
+        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+    elseif ESP.TracerOrigin == "Center" then
+        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    elseif ESP.TracerOrigin == "Mouse" then
+        return Vector2.new(LocalPlayer:GetMouse().X, LocalPlayer:GetMouse().Y)
+    end
+    return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+end
+
+local function createPlayerESP(player)
+    if player == LocalPlayer then return end
+    
+    ESP._players[player] = {
+        name = create("Text", {
+            Visible = false,
+            Center = true,
+            Outline = true,
+            Size = ESP.TextSize,
+            Color = ESP.NameColor,
+            OutlineColor = Color3.new(0, 0, 0)
+        }),
+        box = {
+            topLeft = create("Line", {
+                Visible = false,
+                Thickness = ESP.BoxThickness,
+                Color = ESP.BoxColor
+            }),
+            topRight = create("Line", {
+                Visible = false,
+                Thickness = ESP.BoxThickness,
+                Color = ESP.BoxColor
+            }),
+            bottomLeft = create("Line", {
+                Visible = false,
+                Thickness = ESP.BoxThickness,
+                Color = ESP.BoxColor
+            }),
+            bottomRight = create("Line", {
+                Visible = false,
+                Thickness = ESP.BoxThickness,
+                Color = ESP.BoxColor
             })
-        end
+        },
+        healthBg = create("Square", {
+            Visible = false,
+            Thickness = 1,
+            Filled = true,
+            Color = Color3.new(0, 0, 0),
+            Transparency = 0.5
+        }),
+        healthBar = create("Square", {
+            Visible = false,
+            Thickness = 1,
+            Filled = true,
+            Color = ESP.HealthColor
+        }),
+        distance = create("Text", {
+            Visible = false,
+            Center = true,
+            Outline = true,
+            Size = ESP.TextSize,
+            Color = ESP.DistanceColor,
+            OutlineColor = Color3.new(0, 0, 0)
+        }),
+        skeleton = {},
+        tracer = create("Line", {
+            Visible = false,
+            Thickness = ESP.TracerThickness,
+            Color = ESP.TracerColor
+        }),
+        chams = {}
+    }
+    
+    -- Create skeleton lines
+    for i = 1, 15 do
+        table.insert(ESP._players[player].skeleton, create("Line", {
+            Visible = false,
+            Thickness = ESP.SkeletonThickness,
+            Color = ESP.SkeletonColor
+        }))
     end
     
-    if Settings.Chams.Enabled then
-        NewObject.Objects.Chams = Instance.new("Highlight")
-        NewObject.Objects.Chams.FillColor = Settings.Chams.Color
-        NewObject.Objects.Chams.FillTransparency = Settings.Chams.Transparency
-        NewObject.Objects.Chams.OutlineColor = Settings.Chams.OutlineColor
-        NewObject.Objects.Chams.OutlineTransparency = Settings.Chams.OutlineTransparency
-        NewObject.Objects.Chams.DepthMode = Settings.Chams.DepthMode
-        NewObject.Objects.Chams.Adornee = Model
-        NewObject.Objects.Chams.Parent = game.CoreGui
-    end
-    
-    NewObject.Connections.Destroying = Model.Destroying:Connect(function()
-        NewObject:Destroy()
-    end)
-    
-    NewObject.Connections.AncestryChanged = Model.AncestryChanged:Connect(function(Old, New)
-        if not Model:IsDescendantOf(workspace) and NewObject.RenderSettings.DestroyOnRemove or NewObject.GlobalSettings.DestroyOnRemove then
-            NewObject:Destroy()
+    -- Track when player leaves
+    ESP._connections[player] = player.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            ESP:RemovePlayer(player)
         end
     end)
     
-    if Humanoid then
-        NewObject.Connections.Died = Humanoid.Died:Connect(function()
-            if Settings.RemoveOnDeath then
-                NewObject:Destroy()
+    -- Record created drawings
+    for _, drawing in pairs(ESP._players[player]) do
+        if type(drawing) ~= "table" then
+            table.insert(ESP._drawings, drawing)
+        elseif drawing ~= ESP._players[player].chams then
+            for _, subDrawing in pairs(drawing) do
+                table.insert(ESP._drawings, subDrawing)
             end
-        end)
-    end
-    
-    NewObject.Connections.Removing = Model.AncestryChanged:Connect(function()
-        if NewObject.RenderSettings.DestroyOnRemove or NewObject.GlobalSettings.DestroyOnRemove then
-            NewObject:Destroy()
         end
-    end)
-    
-    return NewObject
-end
-
-function Object:GetQuad()
-    local RenderSettings = self.RenderSettings
-    local GlobalSettings = self.GlobalSettings
-    
-    local MaxSize = GetValue(RenderSettings, GlobalSettings, "MaxBoxSize")
-    local BoxTopOffset = GetValue(RenderSettings, GlobalSettings, "BoxTopOffset")
-    
-    local Model = self.Model
-    local Camera = workspace.CurrentCamera
-    local Pivot = Model:GetPivot()
-    
-    -- Apply offset
-    Pivot = Pivot * ESP:GetOffset(Model)
-    
-    -- Get the character size from bounding box
-    local _, Size = Model:GetBoundingBox()
-    
-    -- Clamp the size based on MaxBoxSize
-    local X, Y = math.clamp(Size.X, 1, MaxSize.X) / 2, math.clamp(Size.Y, 1, MaxSize.Y) / 2
-    
-    -- Get the position of the model on screen
-    local Position, IsOnScreen = ESP:GetScreenPosition(Pivot.Position)
-    
-    -- Check if any part of the model is visible
-    if not IsOnScreen then
-        return false
-    end
-    
-    -- Calculate the camera's viewing direction to the model
-    local CameraPosition = Camera.CFrame.Position
-    local LookVector = (Pivot.Position - CameraPosition).Unit
-    
-    -- Calculate camera-aligned right and up vectors
-    local Right = Camera.CFrame.RightVector
-    local Up = Camera.CFrame.UpVector
-    
-    -- Calculate the corners of the box in 3D space, aligned with the camera view
-    local TopRight = Pivot.Position + (Right * X) + (Up * Y)
-    local TopLeft = Pivot.Position - (Right * X) + (Up * Y)
-    local BottomLeft = Pivot.Position - (Right * X) - (Up * Y)
-    local BottomRight = Pivot.Position + (Right * X) - (Up * Y)
-    
-    -- Convert 3D positions to screen positions
-    local TopRightPos, TopRightOnScreen = ESP:GetScreenPosition(TopRight)
-    local TopLeftPos, TopLeftOnScreen = ESP:GetScreenPosition(TopLeft)
-    local BottomLeftPos, BottomLeftOnScreen = ESP:GetScreenPosition(BottomLeft)
-    local BottomRightPos, BottomRightOnScreen = ESP:GetScreenPosition(BottomRight)
-    
-    -- Calculate additional points for other features
-    local BoxTop = ESP:GetScreenPosition(Pivot.Position + (Up * Y) + BoxTopOffset)
-    local BoxBottom = ESP:GetScreenPosition(Pivot.Position - (Up * Y))
-    
-    -- Check if any corner is on screen
-    if TopRightOnScreen or TopLeftOnScreen or BottomLeftOnScreen or BottomRightOnScreen then
-        local Positions = {
-            BoxBottom = BoxBottom,
-            Pivot = Position,
-            BoxTop = BoxTop,
-            TopRight = TopRightPos,
-            TopLeft = TopLeftPos,
-            BottomLeft = BottomLeftPos,
-            BottomRight = BottomRightPos,
-        }
-    
-        return Positions, true
-    end
-    
-    return false
-end
-
-function Object:DrawBox(Quad)
-    local RenderSettings = self.RenderSettings
-    local GlobalSettings = self.GlobalSettings
-    
-    local RenderBoxes = RenderSettings.Boxes
-    local GlobalBoxes = GlobalSettings.Boxes
-    
-    local TeamColors = GetValue(RenderSettings, GlobalSettings, "TeamColors")
-    local Thickness = GetValue(RenderBoxes, GlobalBoxes, "Thickness")
-    local Color = GetValue(RenderBoxes, GlobalBoxes, "Color")
-
-    local Properties = {
-        Visible = true,
-        Color = TeamColors and ESP:GetTeamColor(self.Model) or Color,
-        Thickness = Thickness,
-        PointA = Quad.TopRight,
-        PointB = Quad.TopLeft,
-        PointC = Quad.BottomLeft,
-        PointD = Quad.BottomRight,
-    }
-    
-    for Property, Value in next, Properties do
-        self.Objects.Box[Property] = Value
     end
 end
 
-function Object:DrawName(Quad)
-    local RenderSettings = self.RenderSettings
-    local GlobalSettings = self.GlobalSettings
+function ESP:GetHealth(player)
+    local character = player.Character
+    if not character then return 0, 100 end
     
-    local RenderNames = RenderSettings.Names
-    local GlobalNames = GlobalSettings.Names
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return 0, 100 end
     
-    local Settings = RenderNames or GlobalNames
-    
-    local ShowDistance = GetValue(RenderNames, GlobalNames, "Distance")
-    local Size = GetValue(RenderNames, GlobalNames, "Size")
-    local Resize = GetValue(RenderNames, GlobalNames, "Resize")
-    local ResizeWeight = GetValue(RenderNames, GlobalNames, "ResizeWeight")
-    local ShowHealth = GetValue(RenderNames, GlobalNames, "Health")
-    local Font = GetValue(RenderNames, GlobalNames, "Font")
-    local Center = GetValue(RenderNames, GlobalNames, "Center")
-    local TeamColors = GetValue(RenderNames, GlobalNames, "TeamColors")
-    local Color = GetValue(RenderNames, GlobalNames, "Color")
-    local Outline = GetValue(RenderNames, GlobalNames, "Outline")
-    
-    local Distance = self.Model:GetPivot().Position
-    
-    local Properties = {
-        Visible = true,
-        Color = TeamColors and ESP:GetTeamColor(self.Model) or Color,
-        Outline = Outline,
-        Text = not (Size or ShowHealth) and self.Name or ("%s [%sm]%s"):format(self.Name, ShowDistance and tostring(ESP:GetDistance(Distance)) or "", ShowHealth and ("\n%d/%d (%d%%)"):format(ESP:GetHealth(self.Model)) or ""),
-        Size = not Resize and Size or Size - math.clamp((ESP:GetDistance(Distance) * ResizeWeight), 1, Size * 0.75),
-        Font = Font,
-        Center = Center,
-        Position = Quad.BoxTop,
-    }
+    return humanoid.Health, humanoid.MaxHealth
+end
 
-    for Property, Value in next, Properties do
-        self.Objects.Name[Property] = Value
+function ESP:ToggleESP(enabled)
+    self.Enabled = enabled
+end
+
+function ESP:ToggleNameESP(enabled)
+    self.ShowName = enabled
+end
+
+function ESP:ToggleBoxESP(enabled)
+    self.ShowBox = enabled
+end
+
+function ESP:ToggleHealthESP(enabled)
+    self.ShowHealth = enabled
+end
+
+function ESP:ToggleDistanceESP(enabled)
+    self.ShowDistance = enabled
+end
+
+function ESP:ToggleChamsESP(enabled)
+    self.ShowChams = enabled
+    
+    if not enabled then
+        -- Remove all existing chams
+        for player, esp in pairs(self._players) do
+            for _, highlight in pairs(esp.chams) do
+                if highlight and highlight.Parent then
+                    highlight:Destroy()
+                end
+            end
+            self._players[player].chams = {}
+        end
     end
 end
 
-function Object:DrawTracer(Quad)
-    local RenderSettings = self.RenderSettings
-    local GlobalSettings = self.GlobalSettings
-    
-    local RenderTracers = RenderSettings.Tracers
-    local GlobalTracers = GlobalSettings.Tracers
-    
-    local TeamColors = GetValue(RenderTracers, GlobalTracers, "TeamColors")
-    local Color = GetValue(RenderTracers, GlobalTracers, "Color")
-    local Thickness = GetValue(RenderTracers, GlobalTracers, "Thickness")
+function ESP:ToggleSkeletonESP(enabled)
+    self.ShowSkeleton = enabled
+end
 
-    local At
-    if ESP.Settings.Tracers.At == "Mouse" then
-        At = UserInputService:GetMouseLocation()
-    elseif ESP.Settings.Tracers.At == "Bottom" then
-        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 1)
-    elseif ESP.Settings.Tracers.At == "Top" then
-        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 0)
-    elseif ESP.Settings.Tracers.At == "Center" then
-        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 0.5)
-    else
-        At = workspace.CurrentCamera.ViewportSize * Vector2.new(0.5, 1)
-    end
-    
-    local Properties = {
-        Visible = true,
-        Color = TeamColors and ESP:GetTeamColor(self.Model) or Color,
-        Thickness = Thickness,
-        From = At,
-        To = Quad.BoxBottom,
-    }
-    
-    for Property, Value in next, Properties do
-        self.Objects.Tracer[Property] = Value
+function ESP:ToggleTracerESP(enabled)
+    self.ShowTracer = enabled
+end
+
+function ESP:SetColor(feature, color)
+    if feature == "Box" then
+        self.BoxColor = color
+    elseif feature == "Name" then
+        self.NameColor = color
+    elseif feature == "Health" then
+        self.HealthColor = color
+    elseif feature == "Distance" then
+        self.DistanceColor = color
+    elseif feature == "Chams" then
+        self.ChamsColor = color
+    elseif feature == "Skeleton" then
+        self.SkeletonColor = color
+    elseif feature == "Tracer" then
+        self.TracerColor = color
     end
 end
 
-function Object:DrawSkeleton()
-    local Model = self.Model
-    local RenderSettings = self.RenderSettings
-    local GlobalSettings = self.GlobalSettings
+function ESP:SetTracerOrigin(origin)
+    if origin == "Bottom" or origin == "Center" or origin == "Mouse" then
+        self.TracerOrigin = origin
+    end
+end
+
+function ESP:RemovePlayer(player)
+    local playerESP = self._players[player]
+    if not playerESP then return end
     
-    local SkeletonSettings = GlobalSettings.Skeleton
-    if not SkeletonSettings.Enabled then return end
-    
-    local TeamColors = GetValue(RenderSettings, GlobalSettings, "TeamColors")
-    local Color = SkeletonSettings.Color
-    
-    local Humanoid = Model:FindFirstChildOfClass("Humanoid")
-    if not Humanoid then return end
-    
-    local Connections = Humanoid.RigType == Enum.HumanoidRigType.R6 and SkeletonSettings.R6Connections or SkeletonSettings.Connections
-    
-    for _, Connection in ipairs(Connections) do
-        local Part1Name, Part2Name = Connection[1], Connection[2]
-        local Part1 = Model:FindFirstChild(Part1Name)
-        local Part2 = Model:FindFirstChild(Part2Name)
-        
-        if Part1 and Part2 then
-            local LineKey = Part1Name .. "-" .. Part2Name
-            local Line = self.Objects.Skeleton[LineKey]
-            
-            if Line then
-                local Pos1, OnScreen1 = ESP:GetScreenPosition(Part1.Position)
-                local Pos2, OnScreen2 = ESP:GetScreenPosition(Part2.Position)
-                
-                if OnScreen1 or OnScreen2 then
-                    Line.Visible = true
-                    Line.From = Pos1
-                    Line.To = Pos2
-                    Line.Color = TeamColors and ESP:GetTeamColor(Model) or Color
-                    Line.Thickness = SkeletonSettings.Thickness
-                else
-                    Line.Visible = false
+    -- Remove all drawings
+    for _, drawing in pairs(playerESP) do
+        if type(drawing) ~= "table" then
+            drawing:Remove()
+        elseif drawing ~= playerESP.chams then
+            for _, subDrawing in pairs(drawing) do
+                subDrawing:Remove()
+            end
+        else
+            for _, highlight in pairs(drawing) do
+                if highlight and highlight.Parent then
+                    highlight:Destroy()
                 end
             end
         end
     end
+    
+    -- Disconnect player connection
+    if self._connections[player] then
+        self._connections[player]:Disconnect()
+        self._connections[player] = nil
+    end
+    
+    -- Remove player from ESP list
+    self._players[player] = nil
 end
 
-function Object:UpdateChams()
-    local Model = self.Model
-    local Chams = self.Objects.Chams
-    local RenderSettings = self.RenderSettings
-    local GlobalSettings = self.GlobalSettings
+function ESP:UpdateChams(player)
+    if not self.ShowChams or not self.Enabled then return end
     
-    if not Chams or not GlobalSettings.Chams.Enabled then return end
+    local playerESP = self._players[player]
+    if not playerESP then return end
     
-    local TeamColors = GetValue(RenderSettings, GlobalSettings, "TeamColors")
-    local ChamsSettings = GlobalSettings.Chams
+    local character = player.Character
+    if not character then return end
     
-    Chams.FillColor = TeamColors and ESP:GetTeamColor(Model) or ChamsSettings.Color
-    Chams.OutlineColor = TeamColors and ESP:GetTeamColor(Model) or ChamsSettings.OutlineColor
-    Chams.Enabled = true
-end
-
-function Object:Destroy()
-    ESP.Objects[self.Model] = nil
-    self:ClearDrawings()
-    
-    for i, v in next, self.Objects do
-        if i == "Chams" then
-            if v and v.Parent then
-                v:Destroy()
-            end
-        elseif i == "Skeleton" then
-            for _, Line in pairs(v) do
-                Line:Remove()
-            end
-        else
-            v:Remove()
+    -- Clear existing chams
+    for _, highlight in pairs(playerESP.chams) do
+        if highlight and highlight.Parent then
+            highlight:Destroy()
         end
     end
+    playerESP.chams = {}
     
-    for i, v in next, self.Connections do
-        v:Disconnect()
-    end
-    
-    table.clear(self.Objects)
-end
-
-function Object:ClearDrawings()
-    for i, v in next, self.Objects do
-        if i == "Chams" then
-            if v then
-                v.Enabled = false
-            end
-        elseif i == "Skeleton" then
-            for _, Line in pairs(v) do
-                Line.Visible = false
-            end
-        else
-            v.Visible = false
+    -- Create new chams for each part
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            local highlight = Instance.new("Highlight")
+            highlight.FillColor = self.ChamsColor
+            highlight.OutlineColor = self.ChamsColor
+            highlight.FillTransparency = self.ChamsTransparency
+            highlight.OutlineTransparency = 0.7
+            highlight.Adornee = part
+            highlight.Parent = espFolder
+            
+            table.insert(playerESP.chams, highlight)
         end
     end
 end
 
-function Object:Refresh()
-    local Model = self.Model
-    local Quad = self:GetQuad()
-    local RenderSettings = self.RenderSettings
-    local GlobalSettings = self.GlobalSettings
-    
-    local TeamBased = GetValue(RenderSettings, GlobalSettings, "TeamBased")
-    local MaxDistance = GetValue(RenderSettings, GlobalSettings, "MaxDistance")
-    local Boxes = GetValue(RenderSettings.Boxes, GlobalSettings.Boxes, "Enabled")
-    local Names = GetValue(RenderSettings.Names, GlobalSettings.Names, "Enabled")
-    local Tracers = GetValue(RenderSettings.Tracers, GlobalSettings.Tracers, "Enabled")
-    local Chams = GetValue(RenderSettings.Chams, GlobalSettings.Chams, "Enabled")
-    local Skeleton = GetValue(RenderSettings.Skeleton, GlobalSettings.Skeleton, "Enabled")
-    
-    if not ESP.Enabled then
-        return self:ClearDrawings()
-    end
-    
-    if not Model.Parent or not Model:IsDescendantOf(workspace) then
-        return self:ClearDrawings()
-    end
-    
-    if TeamBased and not ESP:IsHostile(Model) then
-        return self:ClearDrawings()
-    end
-    
-    if ESP:GetDistance(Model:GetPivot().Position) > MaxDistance then
-        return self:ClearDrawings()
-    end
-    
-    if Chams then
-        self:UpdateChams()
-    elseif self.Objects.Chams then
-        self.Objects.Chams.Enabled = false
-    end
-    
-    if Skeleton then
-        self:DrawSkeleton()
-    else
-        for _, Line in pairs(self.Objects.Skeleton) do
-            Line.Visible = false
+-- Main ESP update function
+function ESP:Update()
+    if not self.Enabled then
+        for _, esp in pairs(self._players) do
+            for _, drawing in pairs(esp) do
+                if type(drawing) ~= "table" then
+                    drawing.Visible = false
+                elseif drawing ~= esp.chams then
+                    for _, subDrawing in pairs(drawing) do
+                        subDrawing.Visible = false
+                    end
+                end
+            end
         end
-    end
-    
-    if not Quad then 
-        if self.Objects.Box then self.Objects.Box.Visible = false end
-        if self.Objects.Name then self.Objects.Name.Visible = false end
-        if self.Objects.Tracer then self.Objects.Tracer.Visible = false end
         return
     end
     
-    if Boxes then
-        self:DrawBox(Quad)
-    else
-        self.Objects.Box.Visible = false
-    end
-    
-    if Names then
-        self:DrawName(Quad)
-    else
-        self.Objects.Name.Visible = false
-    end
-    
-    if Tracers then
-        self:DrawTracer(Quad)
-    else
-        self.Objects.Tracer.Visible = false
+    for player, esp in pairs(self._players) do
+        local character = player.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") or not character:FindFirstChildOfClass("Humanoid") then
+            -- Hide ESP if character isn't loaded
+            for _, drawing in pairs(esp) do
+                if type(drawing) ~= "table" then
+                    drawing.Visible = false
+                elseif drawing ~= esp.chams then
+                    for _, subDrawing in pairs(drawing) do
+                        subDrawing.Visible = false
+                    end
+                end
+            end
+            continue
+        end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        local head = character:FindFirstChild("Head")
+        
+        -- Check if player is on screen
+        local pos, onScreen = worldToScreen(hrp.Position)
+        if not onScreen then
+            -- Hide ESP if player is off screen
+            for _, drawing in pairs(esp) do
+                if type(drawing) ~= "table" then
+                    drawing.Visible = false
+                elseif drawing ~= esp.chams then
+                    for _, subDrawing in pairs(drawing) do
+                        subDrawing.Visible = false
+                    end
+                end
+            end
+            continue
+        end
+        
+        -- Update Chams (Highlight instances)
+        if self.ShowChams then
+            if #esp.chams == 0 then
+                self:UpdateChams(player)
+            end
+        else
+            for _, highlight in pairs(esp.chams) do
+                if highlight and highlight.Parent then
+                    highlight:Destroy()
+                end
+            end
+            esp.chams = {}
+        end
+        
+        -- Update Box ESP
+        if self.ShowBox then
+            local corners = getPlayerBoundingBox(character)
+            if corners then
+                -- Top Line
+                esp.box.topLeft.From = corners.topLeft
+                esp.box.topLeft.To = corners.topRight
+                esp.box.topLeft.Color = self.BoxColor
+                esp.box.topLeft.Thickness = self.BoxThickness
+                esp.box.topLeft.Visible = true
+                
+                -- Right Line
+                esp.box.topRight.From = corners.topRight
+                esp.box.topRight.To = corners.bottomRight
+                esp.box.topRight.Color = self.BoxColor
+                esp.box.topRight.Thickness = self.BoxThickness
+                esp.box.topRight.Visible = true
+                
+                -- Bottom Line
+                esp.box.bottomLeft.From = corners.bottomLeft
+                esp.box.bottomLeft.To = corners.bottomRight
+                esp.box.bottomLeft.Color = self.BoxColor
+                esp.box.bottomLeft.Thickness = self.BoxThickness
+                esp.box.bottomLeft.Visible = true
+                
+                -- Left Line
+                esp.box.bottomRight.From = corners.topLeft
+                esp.box.bottomRight.To = corners.bottomLeft
+                esp.box.bottomRight.Color = self.BoxColor
+                esp.box.bottomRight.Thickness = self.BoxThickness
+                esp.box.bottomRight.Visible = true
+            else
+                for _, line in pairs(esp.box) do
+                    line.Visible = false
+                end
+            end
+        else
+            for _, line in pairs(esp.box) do
+                line.Visible = false
+            end
+        end
+        
+        -- Update Name ESP
+        if self.ShowName then
+            local headPos
+            if head then
+                headPos, _ = worldToScreen(head.Position + Vector3.new(0, 1, 0))
+            else
+                headPos = pos - Vector2.new(0, 40)
+            end
+            
+            esp.name.Position = headPos
+            esp.name.Text = player.Name
+            esp.name.Size = self.TextSize
+            esp.name.Color = self.NameColor
+            esp.name.Visible = true
+        else
+            esp.name.Visible = false
+        end
+        
+        -- Update Health ESP
+        if self.ShowHealth then
+            local corners = getPlayerBoundingBox(character)
+            if corners and humanoid then
+                local health, maxHealth = humanoid.Health, humanoid.MaxHealth
+                local healthPercentage = math.clamp(health / maxHealth, 0, 1)
+                
+                -- Position health bar to the left of the box
+                local barPos = corners.topLeft - Vector2.new(8, 0)
+                local barHeight = (corners.bottomLeft.Y - corners.topLeft.Y)
+                
+                -- Background
+                esp.healthBg.Size = Vector2.new(4, barHeight)
+                esp.healthBg.Position = barPos - Vector2.new(2, 0)
+                esp.healthBg.Visible = true
+                
+                -- Health bar
+                esp.healthBar.Size = Vector2.new(4, barHeight * healthPercentage)
+                esp.healthBar.Position = Vector2.new(
+                    barPos.X - 2,
+                    barPos.Y + barHeight * (1 - healthPercentage)
+                )
+                
+                -- Color gradient (green to red)
+                esp.healthBar.Color = Color3.fromRGB(
+                    255 * (1 - healthPercentage),
+                    255 * healthPercentage,
+                    0
+                )
+                
+                esp.healthBar.Visible = true
+            else
+                esp.healthBg.Visible = false
+                esp.healthBar.Visible = false
+            end
+        else
+            esp.healthBg.Visible = false
+            esp.healthBar.Visible = false
+        end
+        
+        -- Update Distance ESP
+        if self.ShowDistance then
+            local corners = getPlayerBoundingBox(character)
+            if corners then
+                local distance = getDistance(character)
+                esp.distance.Text = tostring(distance) .. "m"
+                esp.distance.Position = Vector2.new(
+                    (corners.bottomLeft.X + corners.bottomRight.X) / 2,
+                    corners.bottomLeft.Y + 5
+                )
+                esp.distance.Size = self.TextSize
+                esp.distance.Color = self.DistanceColor
+                esp.distance.Visible = true
+            else
+                esp.distance.Visible = false
+            end
+        else
+            esp.distance.Visible = false
+        end
+        
+        -- Update Skeleton ESP
+        if self.ShowSkeleton then
+            local limbPositions = getLimbPositions(character)
+            
+            -- Hide all skeleton lines first
+            for _, line in ipairs(esp.skeleton) do
+                line.Visible = false
+            end
+            
+            -- Update only the lines we need
+            for i, limb in ipairs(limbPositions) do
+                if i <= #esp.skeleton then
+                    local line = esp.skeleton[i]
+                    line.From = limb[1]
+                    line.To = limb[2]
+                    line.Color = self.SkeletonColor
+                    line.Thickness = self.SkeletonThickness
+                    line.Visible = true
+                end
+            end
+        else
+            for _, line in ipairs(esp.skeleton) do
+                line.Visible = false
+            end
+        end
+        
+        -- Update Tracer ESP
+        if self.ShowTracer then
+            local tracerOrigin = getTracerOrigin()
+            local targetPos
+            
+            if head then
+                targetPos, _ = worldToScreen(head.Position)
+            else
+                targetPos = pos
+            end
+            
+            esp.tracer.From = tracerOrigin
+            esp.tracer.To = targetPos
+            esp.tracer.Color = self.TracerColor
+            esp.tracer.Thickness = self.TracerThickness
+            esp.tracer.Visible = true
+        else
+            esp.tracer.Visible = false
+        end
     end
 end
 
-RunService.RenderStepped:Connect(function()
-    for i, Object in next, ESP.Objects do
-        Object:Refresh()
-    end
-end)
-
-for _, Player in pairs(Players:GetPlayers()) do
-    if Player ~= Players.LocalPlayer and Player.Character then
-        ESP.Object:New(Player.Character)
+-- Initialize ESP
+function ESP:Init()
+    -- Add ESP for existing players
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            createPlayerESP(player)
+        end
     end
     
-    ESP:CharacterAdded(Player):Connect(function(Character)
-        ESP.Object:New(Character)
-    end)
+    -- Add ESP for new players
+    table.insert(ESP._connections, Players.PlayerAdded:Connect(function(player)
+        createPlayerESP(player)
+    end))
+    
+    -- Update ESP
+    table.insert(ESP._connections, RunService.RenderStepped:Connect(function()
+        ESP:Update()
+    end))
+    
+    -- Clean up on script termination
+    table.insert(ESP._connections, game.Close:Connect(function()
+        ESP:Cleanup()
+    end))
 end
 
-Players.PlayerAdded:Connect(function(Player)
-    ESP:CharacterAdded(Player):Connect(function(Character)
-        ESP.Object:New(Character)
-    end)
-end)
+function ESP:Cleanup()
+    -- Disconnect all connections
+    for _, connection in pairs(self._connections) do
+        if typeof(connection) == "RBXScriptConnection" then
+            connection:Disconnect()
+        end
+    end
+    
+    -- Remove all drawings
+    for _, drawing in pairs(self._drawings) do
+        drawing:Remove()
+    end
+    
+    -- Remove all chams
+    for _, esp in pairs(self._players) do
+        for _, highlight in pairs(esp.chams) do
+            if highlight and highlight.Parent then
+                highlight:Destroy()
+            end
+        end
+    end
+    
+    -- Remove ESP folder
+    if espFolder and espFolder.Parent then
+        espFolder:Destroy()
+    end
+    
+    -- Clear tables
+    self._players = {}
+    self._connections = {}
+    self._drawings = {}
+end
 
-return ESP
+-- API for users to control ESP features
+local ESPController = {
+    -- Toggle main ESP
+    toggle = function(enabled)
+        ESP:ToggleESP(enabled)
+    end,
+    
+    -- Toggle individual features
+    toggleName = function(enabled)
+        ESP:ToggleNameESP(enabled)
+    end,
+    
+    toggleBox = function(enabled)
+        ESP:ToggleBoxESP(enabled)
+    end,
+    
+    toggleHealth = function(enabled)
+        ESP:ToggleHealthESP(enabled)
+    end,
+    
+    toggleDistance = function(enabled)
+        ESP:ToggleDistanceESP(enabled)
+    end,
+    
+    toggleChams = function(enabled)
+        ESP:ToggleChamsESP(enabled)
+    end,
+    
+    toggleSkeleton = function(enabled)
+        ESP:ToggleSkeletonESP(enabled)
+    end,
+    
+    toggleTracer = function(enabled)
+        ESP:ToggleTracerESP(enabled)
+    end,
+    
+    -- Change colors
+    setColor = function(feature, r, g, b)
+        ESP:SetColor(feature, Color3.fromRGB(r, g, b))
+    end,
+    
+    -- Change tracer origin
+    setTracerOrigin = function(origin)
+        ESP:SetTracerOrigin(origin)
+    end,
+    
+    -- Access to ESP object for advanced customization
+    getESP = function()
+        return ESP
+    end
+}
+
+-- Initialize ESP
+ESP:Init()
+
+-- Return the controller
+return ESPController
