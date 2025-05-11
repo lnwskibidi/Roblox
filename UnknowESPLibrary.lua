@@ -1,677 +1,486 @@
-local RobloxESP = {}
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+-- This was my first time ever using the drawing library, there's probably 200 issues I haven't found yet. Please tell me if there are any problems.
 
-RobloxESP.Settings = {
+
+local Players = game:GetService("Players")
+
+local ESP = {
     Enabled = true,
-    
-    PlayerESP = {
-        Enabled = true,
-        TeamCheck = true,
-        TeamColor = true,
-        Color = Color3.fromRGB(255, 0, 0),
-        ShowFriends = true,
-        FriendColor = Color3.fromRGB(0, 255, 0)
+    Settings = {
+        RemoveOnDeath = true,
+        MaxDistance = 300, -- Max Distance for esp to render (IN METERS).
+        MaxBoxSize = Vector3.new(15, 15, 0), -- Max size for ESP boxes.
+        DestroyOnRemove = true, -- Whether the ESP objects should be deleted when the character is parented to nil, change this if you want.
+        TeamColors = false, -- Whether or not the ESP color is based on team colors.
+        TeamBased = false, -- Whether or not the ESP should render ESP on teammates. 
+        BoxTopOffset = Vector3.new(0, 1, 0), -- Offset for where the top of the box should be
+        
+        Boxes = {
+            Enabled = true,
+            Color = Color3.new(1, 0, 1),
+            Thickness = 1,
+        },
+        Names = {
+            Distance = true,
+            Health = true, -- Adds health values to the nametag.
+            Enabled = true,
+            Resize = true, -- Resizes the text based on the distance from the camera to the player so text doesn't get ridiculously large the further you are from the target.
+            ResizeWeight = 0.05, -- How quickly names are resized based on the distance from the camera.
+            Color = Color3.new(1, 1, 1),
+            Size = 18,
+            Font = 1,
+            Center = true,
+            Outline = true,
+        },
+        Tracers = {
+            Enabled = true,
+            Thickness = 0,
+            Color = Color3.new(1, 0, 1),
+        }
     },
-    
-    BoxESP = {
-        Enabled = true,
-        Thickness = 2,
-        Filled = false,
-        Transparency = 0.7
-    },
-    
-    HealthESP = {
-        Enabled = true,
-        Position = "Left",
-        Size = Vector2.new(2, 20),
-        HealthyColor = Color3.fromRGB(0, 255, 0),
-        DamagedColor = Color3.fromRGB(255, 255, 0),
-        CriticalColor = Color3.fromRGB(255, 0, 0)
-    },
-    
-    DistanceESP = {
-        Enabled = true,
-        Position = "Bottom",
-        Unit = "Studs",
-        RoundPrecision = 1,
-        MaxDistance = 1000,
-        Color = Color3.fromRGB(255, 255, 255)
-    },
-    
-    NameESP = {
-        Enabled = true,
-        Position = "Top",
-        ShowDisplayName = true,
-        ShowDistance = true,
-        Font = Drawing.Fonts.UI,
-        Size = 18,
-        Outline = true,
-        Color = Color3.fromRGB(255, 255, 255)
-    },
-    
-    ChamsESP = {
-        Enabled = true,
-        Transparency = 0.5,
-        FillColor = Color3.fromRGB(255, 0, 0),
-        OutlineColor = Color3.fromRGB(255, 255, 255),
-        OutlineTransparency = 0
-    },
-    
-    SkeletonESP = {
-        Enabled = true,
-        Thickness = 1,
-        Color = Color3.fromRGB(255, 255, 255)
-    },
-    
-    TracersESP = {
-        Enabled = true,
-        Origin = "Bottom",
-        Thickness = 1,
-        Color = Color3.fromRGB(255, 255, 255)
-    }
+    Objects = {} -- Table of ESP objects that you can read and do fun stuff with, however, editing settings changes the settings for every object at the same time so this is only needed if you want to set settings for individual targets.
 }
 
-RobloxESP.PlayerData = {}
 
-local Utility = {}
 
-function Utility.GetPlayerColor(player)
-    local settings = RobloxESP.Settings.PlayerESP
+
+
+-- Initial functions for the lib that are used in functions like GetQuad, DrawQuad, Etc.
+
+local function Draw(Type, Properties) -- Manually writing every property and Drawing.new() is extremely painful, making it a table is bazed. I definitely didn't steal this idea from ic3w0lf.
+    local Object = Drawing.new(Type)
     
-    if settings.ShowFriends and LocalPlayer:IsFriendsWith(player.UserId) then
-        return settings.FriendColor
+    for Property, Value in next, Properties or {} do -- Prevents errors
+        Object[Property] = Value
     end
     
-    if settings.TeamCheck and player.Team == LocalPlayer.Team then
-        return nil
-    end
-    
-    if settings.TeamColor and player.Team then
-        return player.TeamColor.Color
-    end
-    
-    return settings.Color
+    return Object
 end
 
-function Utility.CalculateCorners(hrp)
-    local size = Vector3.new(4, 5, 1)
-    local cf = hrp.CFrame
+function ESP:GetScreenPosition(Position) -- Gets the screen position of a vector3 / cframe.
+    local Position = typeof(Position) ~= "CFrame" and Position or Position.Position -- I'm probably going to forget to use .Position like a proper dumbfuck.
+    local ScreenPos, IsOnScreen = workspace.CurrentCamera:WorldToViewportPoint(Position)
     
-    local corners = {
-        TopLeft = cf * CFrame.new(-size.X/2, size.Y/2, 0),
-        TopRight = cf * CFrame.new(size.X/2, size.Y/2, 0),
-        BottomLeft = cf * CFrame.new(-size.X/2, -size.Y/2, 0),
-        BottomRight = cf * CFrame.new(size.X/2, -size.Y/2, 0)
-    }
-    
-    local screenCorners = {}
-    for name, position in pairs(corners) do
-        screenCorners[name] = Camera:WorldToViewportPoint(position.Position)
-    end
-    
-    return screenCorners
+    return Vector2.new(ScreenPos.X, ScreenPos.Y), IsOnScreen -- fuck the depth value i dont want it :<
 end
 
-function Utility.GetBoundingBox(corners)
-    local minX, minY = math.huge, math.huge
-    local maxX, maxY = -math.huge, -math.huge
+function ESP:GetDistance(Position) -- Gets the distance (IN METERS) from the camera position to a target position.
+    local Magnitude = (workspace.CurrentCamera.CFrame.Position - Position).Magnitude
+    local Metric = Magnitude * 0.28 -- Converts studs to meters
     
-    for _, corner in pairs(corners) do
-        minX = math.min(minX, corner.X)
-        minY = math.min(minY, corner.Y)
-        maxX = math.max(maxX, corner.X)
-        maxY = math.max(maxY, corner.Y)
-    end
-    
-    return {
-        TopLeft = Vector2.new(minX, minY),
-        TopRight = Vector2.new(maxX, minY),
-        BottomLeft = Vector2.new(minX, maxY),
-        BottomRight = Vector2.new(maxX, maxY),
-        Size = Vector2.new(maxX - minX, maxY - minY)
-    }
+    return math.round(Metric)
 end
 
-function Utility.GetPositionOnBox(box, position, offset)
-    offset = offset or Vector2.new(0, 0)
+function ESP:GetHealth(Model) -- Tries to find a humanoid and grab its health, this needs to be overwritten in games that have custom health paths.
+    local Humanoid = Model:FindFirstChildOfClass("Humanoid")
     
-    local positions = {
-        Top = Vector2.new(box.TopLeft.X + box.Size.X / 2, box.TopLeft.Y) + Vector2.new(0, -5) + offset,
-        Bottom = Vector2.new(box.BottomLeft.X + box.Size.X / 2, box.BottomLeft.Y) + Vector2.new(0, 5) + offset,
-        Left = Vector2.new(box.TopLeft.X, box.TopLeft.Y + box.Size.Y / 2) + Vector2.new(-5, 0) + offset,
-        Right = Vector2.new(box.TopRight.X, box.TopRight.Y + box.Size.Y / 2) + Vector2.new(5, 0) + offset
-    }
+    if Humanoid then
+        return Humanoid.Health, Humanoid.MaxHealth, (Humanoid.Health / Humanoid.MaxHealth) * 100
+    end
     
-    return positions[position] or positions.Top
+    return 100, 100, 100
 end
 
-function Utility.GetTracerOrigin()
-    local setting = RobloxESP.Settings.TracersESP.Origin
+function ESP:GetPlayerFromCharacter(Model) -- Tries to get a player from their character, if the character doesn't have a player linked to it (thanks custom character games like bad business), it returns nil.
+    return Players:GetPlayerFromCharacter(Model)
+end
+
+function ESP:GetTeam(Model) -- Tries to get a player's team from their character model, if there is no player linked, this returns nil.
+    local Player = ESP:GetPlayerFromCharacter(Model)
     
-    if setting == "Bottom" then
-        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-    elseif setting == "Center" then
-        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    elseif setting == "Mouse" then
-        local mouse = game:GetService("UserInputService"):GetMouseLocation()
-        return Vector2.new(mouse.X, mouse.Y)
-    else
-        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+    return Player and Player.Team or nil
+end
+
+function ESP:GetPlayerTeam(Player) -- Tries to get a player's team, this won't work in games that have custom modules to get player teams and needs to be overwritten.
+    return Player and Player.Team
+end
+
+function ESP:IsHostile(Model) -- Tries to check if a player is hostile based on their team, this, again, won't work with custom characters.
+    local Player = ESP:GetPlayerFromCharacter(Model)
+    local MyTeam, TheirTeam = ESP:GetPlayerTeam(Players.LocalPlayer), ESP:GetPlayerTeam(Player)
+    
+    return (MyTeam ~= TheirTeam)
+end
+
+function ESP:GetTeamColor(Model) -- Tries to get a player's teamcolor from their character model or from their player directly.
+    local Team = Model:IsA("Model") and ESP:GetTeam(Model) or Model:IsA("Player") and ESP:GetPlayerTeam(Model) 
+    
+    return Team and Team.TeamColor.Color or Color3.new(1, 0, 0)
+end
+
+function ESP:GetOffset(Model)
+    local Humanoid = Model:FindFirstChild("Humanoid")
+    
+    if Humanoid and Humanoid.RigType == Enum.HumanoidRigType.R6 then
+        return CFrame.new(0, -1.75, 0)
+    end
+    
+    return CFrame.new(0, 0, 0)
+end
+
+function ESP:CharacterAdded(Player) -- Some games have custom characteradded signals, edit this if you want to change it for compatibility.
+    return Player.CharacterAdded
+end
+
+function ESP:GetCharacter(Player) -- Some games have custom characters and leave player.Character nil, edit this if you need it.
+    return Player.Character
+end
+
+local function Validate(Child, Type, ClassName, ExpectedName)
+    return not (Type or ClassName or ExpectedName) or (not ExpectedName or (ExpectedName and Child.Name == ExpectedName)) and (not ClassName or (ClassName and Child.ClassName == ClassName)) and (not Type or (Type and Child:IsA(Type))) -- I hate my life.
+end
+
+function ESP:AddListener(Model, Validator, Settings)
+    local Descendants = Settings.Descendants
+    local Type, ClassName, ExpectedName = Settings.Type, Settings.ClassName, Settings.ExpectedName
+    local ExtraSettings = Settings.Custom or {}
+    
+    local function ValidCheck(Child)
+        if typeof(Validator) == "function" and Validator(Child) or not Validator then
+            if Validate(Child, Type, ClassName, ExpectedName) then
+                ESP.Object:New(Child, ExtraSettings)
+            end
+        end
+    end
+    
+    local Connection = Descendants and Model.DescendantAdded or Model.ChildAdded
+    local ObjectsToCheck = Descendants and Model.GetDescendants or Model.GetChildren
+    
+    Connection:Connect(function(Child)
+        task.spawn(ValidCheck, Child)
+    end)
+    
+    for i, Child in next, ObjectsToCheck(Model) do
+        task.spawn(ValidCheck, Child)
     end
 end
 
-function Utility.GetSkeletonPoints(player)
-    local character = player.Character
-    if not character then return {} end
+
+-- Actual drawing functions for making boxes and stuff weee.
+
+local Object = {}
+Object.__index = Object
+
+ESP.Object = Object
+
+local function Clone(Table) -- es not mine i stole it from roblox docs
+    local Ret = {}
     
-    local joints = {
-        Head = character:FindFirstChild("Head"),
-        RootPart = character:FindFirstChild("HumanoidRootPart"),
-        LeftUpperArm = character:FindFirstChild("LeftUpperArm"),
-        LeftLowerArm = character:FindFirstChild("LeftLowerArm"),
-        LeftHand = character:FindFirstChild("LeftHand"),
-        RightUpperArm = character:FindFirstChild("RightUpperArm"),
-        RightLowerArm = character:FindFirstChild("RightLowerArm"),
-        RightHand = character:FindFirstChild("RightHand"),
-        LeftUpperLeg = character:FindFirstChild("LeftUpperLeg"),
-        LeftLowerLeg = character:FindFirstChild("LeftLowerLeg"),
-        LeftFoot = character:FindFirstChild("LeftFoot"),
-        RightUpperLeg = character:FindFirstChild("RightUpperLeg"),
-        RightLowerLeg = character:FindFirstChild("RightLowerLeg"),
-        RightFoot = character:FindFirstChild("RightFoot")
-    }
-    
-    local points = {}
-    for name, part in pairs(joints) do
-        if part then
-            local screenPos = Camera:WorldToViewportPoint(part.Position)
-            points[name] = Vector2.new(screenPos.X, screenPos.Y)
+    for i,v in next, Table do
+        if typeof(v) == "table" then
+            v = Clone(v)
         end
+        
+        Ret[i] = v
     end
     
-    return points, joints
+    return Ret
 end
 
-function RobloxESP.CreateDrawings(player)
-    local data = {
-        Player = player,
-        Box = Drawing.new("Square"),
-        BoxFill = Drawing.new("Square"),
-        HealthBar = Drawing.new("Square"),
-        HealthBarBackground = Drawing.new("Square"),
-        Name = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        Tracer = Drawing.new("Line"),
-        Chams = {},
-        Skeleton = {}
-    }
+local function GetValue(Local, Global, Name) -- Blame the bird. Easy way to check if a setting is enabled on either the object settings or global settings.
+    local GlobalVal = Global[Name]
+    local LocalVal = Local[Name]
     
-    for i = 1, 12 do
-        table.insert(data.Skeleton, Drawing.new("Line"))
-    end
-    
-    data.Box.Thickness = RobloxESP.Settings.BoxESP.Thickness
-    data.Box.Filled = false
-    data.Box.Transparency = 1
-    data.Box.Visible = false
-    
-    data.BoxFill.Thickness = 1
-    data.BoxFill.Filled = true
-    data.BoxFill.Transparency = RobloxESP.Settings.BoxESP.Transparency
-    data.BoxFill.Visible = false
-    
-    data.HealthBar.Thickness = 1
-    data.HealthBar.Filled = true
-    data.HealthBar.Transparency = 1
-    data.HealthBar.Visible = false
-    
-    data.HealthBarBackground.Thickness = 1
-    data.HealthBarBackground.Filled = true
-    data.HealthBarBackground.Transparency = 0.5
-    data.HealthBarBackground.Color = Color3.fromRGB(0, 0, 0)
-    data.HealthBarBackground.Visible = false
-    
-    data.Name.Transparency = 1
-    data.Name.Size = RobloxESP.Settings.NameESP.Size
-    data.Name.Center = true
-    data.Name.Outline = RobloxESP.Settings.NameESP.Outline
-    data.Name.Font = RobloxESP.Settings.NameESP.Font
-    data.Name.Visible = false
-    
-    data.Distance.Transparency = 1
-    data.Distance.Size = RobloxESP.Settings.NameESP.Size - 2
-    data.Distance.Center = true
-    data.Distance.Outline = true
-    data.Distance.Font = RobloxESP.Settings.NameESP.Font
-    data.Distance.Visible = false
-    
-    data.Tracer.Thickness = RobloxESP.Settings.TracersESP.Thickness
-    data.Tracer.Transparency = 1
-    data.Tracer.Visible = false
-    
-    for _, line in ipairs(data.Skeleton) do
-        line.Thickness = RobloxESP.Settings.SkeletonESP.Thickness
-        line.Transparency = 1
-        line.Visible = false
-        line.Color = RobloxESP.Settings.SkeletonESP.Color
-    end
-    
-    return data
+    return LocalVal or ((LocalVal == nil or typeof(LocalVal) ~= "boolean") and GlobalVal)
 end
 
-function RobloxESP.RemoveDrawings(player)
-    local data = RobloxESP.PlayerData[player]
-    if not data then return end
-    
-    data.Box:Remove()
-    data.BoxFill:Remove()
-    data.HealthBar:Remove()
-    data.HealthBarBackground:Remove()
-    data.Name:Remove()
-    data.Distance:Remove()
-    data.Tracer:Remove()
-    
-    for _, chams in pairs(data.Chams) do
-        if chams and chams.Handle then
-            chams:Destroy()
-        end
+function Object:New(Model, ExtraInfo) -- Object:New(Target, {Name = "Custom Name", Settings = {Box = {Color = Color3.new(0, 1, 0)}}})
+    if not Model then
+        return
     end
     
-    for _, line in ipairs(data.Skeleton) do
-        line:Remove()
-    end
+    local Settings = ESP.Settings
     
-    RobloxESP.PlayerData[player] = nil
-end
-
-function RobloxESP.UpdateESP()
-    for player, data in pairs(RobloxESP.PlayerData) do
-        if player == LocalPlayer then
-            data.Box.Visible = false
-            data.BoxFill.Visible = false
-            data.HealthBar.Visible = false
-            data.HealthBarBackground.Visible = false
-            data.Name.Visible = false
-            data.Distance.Visible = false
-            data.Tracer.Visible = false
-            
-            for _, line in ipairs(data.Skeleton) do
-                line.Visible = false
-            end
-            continue
-        end
+    local NewObject = {
+        Connections = {},
+        RenderSettings = {
+            Boxes = {},
+            Tracers = {},
+            Names = {},
+        },
+        GlobalSettings = Settings,
+        Model = Model,
+        Name = Model.Name,
         
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+        Objects = {
+            Box = {
+                Color = Settings.Boxes.Color,
+                Thickness = Settings.Boxes.Thickness,
+            },
         
-        if not character or not humanoid or not rootPart or humanoid.Health <= 0 then
-            data.Box.Visible = false
-            data.BoxFill.Visible = false
-            data.HealthBar.Visible = false
-            data.HealthBarBackground.Visible = false
-            data.Name.Visible = false
-            data.Distance.Visible = false
-            data.Tracer.Visible = false
+            Name = {
+                Color = Settings.Names.Color,
+                Outline = Settings.Names.Outline,
+                Text = Model.Name,
+                Size = Settings.Names.Size,
+                Font = Settings.Names.Font,
+                Center = Settings.Names.Center,
+            },
             
-            for _, line in ipairs(data.Skeleton) do
-                line.Visible = false
-            end
-            continue
-        end
-        
-        local playerColor = Utility.GetPlayerColor(player)
-        if not playerColor then
-            data.Box.Visible = false
-            data.BoxFill.Visible = false
-            data.HealthBar.Visible = false
-            data.HealthBarBackground.Visible = false
-            data.Name.Visible = false
-            data.Distance.Visible = false
-            data.Tracer.Visible = false
-            
-            for _, line in ipairs(data.Skeleton) do
-                line.Visible = false
-            end
-            continue
-        end
-        
-        local vector, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-        local distance = (rootPart.Position - Camera.CFrame.Position).Magnitude
-        
-        if not onScreen or distance > RobloxESP.Settings.DistanceESP.MaxDistance then
-            data.Box.Visible = false
-            data.BoxFill.Visible = false
-            data.HealthBar.Visible = false
-            data.HealthBarBackground.Visible = false
-            data.Name.Visible = false
-            data.Distance.Visible = false
-            data.Tracer.Visible = false
-            
-            for _, line in ipairs(data.Skeleton) do
-                line.Visible = false
-            end
-            continue
-        end
-        
-        local screenCorners = Utility.CalculateCorners(rootPart)
-        local box = Utility.GetBoundingBox(screenCorners)
-        
-        if RobloxESP.Settings.BoxESP.Enabled then
-            data.Box.Visible = true
-            data.Box.Color = playerColor
-            data.Box.Size = box.Size
-            data.Box.Position = box.TopLeft
-            
-            if RobloxESP.Settings.BoxESP.Filled then
-                data.BoxFill.Visible = true
-                data.BoxFill.Color = playerColor
-                data.BoxFill.Size = box.Size
-                data.BoxFill.Position = box.TopLeft
-                data.BoxFill.Transparency = RobloxESP.Settings.BoxESP.Transparency
-            else
-                data.BoxFill.Visible = false
-            end
-        else
-            data.Box.Visible = false
-            data.BoxFill.Visible = false
-        end
-        
-        if RobloxESP.Settings.HealthESP.Enabled then
-            local healthPercent = humanoid.Health / humanoid.MaxHealth
-            local barPosition = Utility.GetPositionOnBox(box, RobloxESP.Settings.HealthESP.Position)
-            local barSize = RobloxESP.Settings.HealthESP.Size
-            
-            if RobloxESP.Settings.HealthESP.Position == "Left" or RobloxESP.Settings.HealthESP.Position == "Right" then
-                barPosition = barPosition - Vector2.new(barSize.X / 2, 0)
-                
-                data.HealthBarBackground.Visible = true
-                data.HealthBarBackground.Size = Vector2.new(barSize.X, box.Size.Y)
-                data.HealthBarBackground.Position = Vector2.new(barPosition.X, box.TopLeft.Y)
-                
-                data.HealthBar.Visible = true
-                data.HealthBar.Size = Vector2.new(barSize.X, box.Size.Y * healthPercent)
-                data.HealthBar.Position = Vector2.new(barPosition.X, box.TopLeft.Y + box.Size.Y * (1 - healthPercent))
-            else
-                barPosition = barPosition - Vector2.new(0, barSize.Y / 2)
-                
-                data.HealthBarBackground.Visible = true
-                data.HealthBarBackground.Size = Vector2.new(box.Size.X, barSize.Y)
-                data.HealthBarBackground.Position = Vector2.new(box.TopLeft.X, barPosition.Y)
-                
-                data.HealthBar.Visible = true
-                data.HealthBar.Size = Vector2.new(box.Size.X * healthPercent, barSize.Y)
-                data.HealthBar.Position = Vector2.new(box.TopLeft.X, barPosition.Y)
-            end
-            
-            if healthPercent > 0.5 then
-                data.HealthBar.Color = RobloxESP.Settings.HealthESP.HealthyColor
-            elseif healthPercent > 0.2 then
-                data.HealthBar.Color = RobloxESP.Settings.HealthESP.DamagedColor
-            else
-                data.HealthBar.Color = RobloxESP.Settings.HealthESP.CriticalColor
-            end
-        else
-            data.HealthBar.Visible = false
-            data.HealthBarBackground.Visible = false
-        end
-        
-        if RobloxESP.Settings.NameESP.Enabled then
-            local namePosition = Utility.GetPositionOnBox(box, RobloxESP.Settings.NameESP.Position)
-            local displayName = RobloxESP.Settings.NameESP.ShowDisplayName and player.DisplayName or player.Name
-            
-            data.Name.Visible = true
-            data.Name.Position = namePosition
-            data.Name.Text = displayName
-            data.Name.Color = playerColor
-        else
-            data.Name.Visible = false
-        end
-        
-        if RobloxESP.Settings.DistanceESP.Enabled then
-            local distancePosition = Utility.GetPositionOnBox(box, RobloxESP.Settings.DistanceESP.Position)
-            
-            if RobloxESP.Settings.NameESP.Enabled and RobloxESP.Settings.DistanceESP.Position == RobloxESP.Settings.NameESP.Position then
-                if RobloxESP.Settings.DistanceESP.Position == "Bottom" then
-                    distancePosition = distancePosition + Vector2.new(0, 15)
-                else
-                    distancePosition = distancePosition - Vector2.new(0, 15)
-                end
-            end
-            
-            local displayDistance = math.floor(distance * 10^RobloxESP.Settings.DistanceESP.RoundPrecision) / 10^RobloxESP.Settings.DistanceESP.RoundPrecision
-            
-            data.Distance.Visible = true
-            data.Distance.Position = distancePosition
-            data.Distance.Text = tostring(displayDistance) .. " " .. RobloxESP.Settings.DistanceESP.Unit
-            data.Distance.Color = RobloxESP.Settings.DistanceESP.Color
-        else
-            data.Distance.Visible = false
-        end
-        
-        if RobloxESP.Settings.TracersESP.Enabled then
-            local tracerOrigin = Utility.GetTracerOrigin()
-            local tracerEnd = Vector2.new(vector.X, vector.Y)
-            
-            data.Tracer.Visible = true
-            data.Tracer.From = tracerOrigin
-            data.Tracer.To = tracerEnd
-            data.Tracer.Color = playerColor
-        else
-            data.Tracer.Visible = false
-        end
-        
-        if RobloxESP.Settings.SkeletonESP.Enabled then
-            local skeletonPoints, joints = Utility.GetSkeletonPoints(player)
-            local lineIndex = 1
-            
-            local connections = {
-                {skeletonPoints.Head, skeletonPoints.RootPart},
-                {skeletonPoints.RootPart, skeletonPoints.LeftUpperLeg},
-                {skeletonPoints.LeftUpperLeg, skeletonPoints.LeftLowerLeg},
-                {skeletonPoints.LeftLowerLeg, skeletonPoints.LeftFoot},
-                {skeletonPoints.RootPart, skeletonPoints.RightUpperLeg},
-                {skeletonPoints.RightUpperLeg, skeletonPoints.RightLowerLeg},
-                {skeletonPoints.RightLowerLeg, skeletonPoints.RightFoot},
-                {skeletonPoints.RootPart, skeletonPoints.LeftUpperArm},
-                {skeletonPoints.LeftUpperArm, skeletonPoints.LeftLowerArm},
-                {skeletonPoints.LeftLowerArm, skeletonPoints.LeftHand},
-                {skeletonPoints.RootPart, skeletonPoints.RightUpperArm},
-                {skeletonPoints.RightUpperArm, skeletonPoints.RightLowerArm},
-                {skeletonPoints.RightLowerArm, skeletonPoints.RightHand}
+            Tracer = {
+                Thickness = Settings.Tracers.Thickness,
+                Color = Settings.Tracers.Color,
             }
-            
-            for _, connection in ipairs(connections) do
-                local from, to = connection[1], connection[2]
-                if from and to then
-                    local line = data.Skeleton[lineIndex]
-                    line.Visible = true
-                    line.From = from
-                    line.To = to
-                    line.Color = playerColor
-                    lineIndex = lineIndex + 1
-                end
-            end
-            
-            for i = lineIndex, #data.Skeleton do
-                data.Skeleton[i].Visible = false
-            end
-        else
-            for _, line in ipairs(data.Skeleton) do
-                line.Visible = false
-            end
-        end
+        },
+    }
+    
+    for Property, Value in next, ExtraInfo or {} do -- Honestly, I did this at 2am and I can't remember why I did it, probably because I had to filter variables so the stupid drawing objects wouldn't get ESP settings tangled up in the variabled like Enabled, causing an error.
         
-        if RobloxESP.Settings.ChamsESP.Enabled then
-            if not data.Chams.Active then
-                data.Chams = {}
-                data.Chams.Active = true
-                
-                for _, part in pairs(character:GetChildren()) do
-                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                        local highlight = Instance.new("Highlight")
-                        highlight.Adornee = part
-                        highlight.FillColor = RobloxESP.Settings.ChamsESP.FillColor
-                        highlight.OutlineColor = RobloxESP.Settings.ChamsESP.OutlineColor
-                        highlight.FillTransparency = RobloxESP.Settings.ChamsESP.Transparency
-                        highlight.OutlineTransparency = RobloxESP.Settings.ChamsESP.OutlineTransparency
-                        highlight.Parent = part
-                        
-                        data.Chams[part] = highlight
-                    end
-                end
-            end
-            
-            for part, highlight in pairs(data.Chams) do
-                if part and highlight and highlight.Parent then
-                    highlight.FillColor = playerColor
-                    highlight.FillTransparency = RobloxESP.Settings.ChamsESP.Transparency
-                    highlight.OutlineTransparency = RobloxESP.Settings.ChamsESP.OutlineTransparency
-                end
-            end
+        if Property ~= "Settings" then
+            NewObject[Property] = Value
         else
-            if data.Chams.Active then
-                for _, highlight in pairs(data.Chams) do
-                    if highlight and highlight.Parent then
-                        highlight:Destroy()
-                    end
-                end
-                data.Chams = {}
-            end
-        end
-    end
-end
-
-function RobloxESP.Init()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            RobloxESP.PlayerData[player] = RobloxESP.CreateDrawings(player)
-        end
-    end
-    
-    Players.PlayerAdded:Connect(function(player)
-        RobloxESP.PlayerData[player] = RobloxESP.CreateDrawings(player)
-    end)
-    
-    Players.PlayerRemoving:Connect(function(player)
-        RobloxESP.RemoveDrawings(player)
-    end)
-    
-    RunService.RenderStepped:Connect(function()
-        if RobloxESP.Settings.Enabled then
-            RobloxESP.UpdateESP()
-        else
-            for _, data in pairs(RobloxESP.PlayerData) do
-                data.Box.Visible = false
-                data.BoxFill.Visible = false
-                data.HealthBar.Visible = false
-                data.HealthBarBackground.Visible = false
-                data.Name.Visible = false
-                data.Distance.Visible = false
-                data.Tracer.Visible = false
-                
-                for _, line in ipairs(data.Skeleton) do
-                    line.Visible = false
+            for Name, Table in next, Value do
+                for Property, Value in next, Table do
+                    NewObject.RenderSettings[Name][Property] = Value
                 end
             end
         end
+    end
+    
+    NewObject = setmetatable(NewObject, Object)
+    ESP.Objects[Model] = NewObject
+
+    NewObject.Objects.Box = Draw("Quad", NewObject.Objects.Box)
+    NewObject.Objects.Name = Draw("Text", NewObject.Objects.Name)
+    NewObject.Objects.Tracer = Draw("Line", NewObject.Objects.Tracer)
+    
+    NewObject.Connections.Destroying = Model.Destroying:Connect(function() -- We don't want the ESP to try to render an object that doesn't exist anymore.
+        NewObject:Destroy()
     end)
+    
+    NewObject.Connections.AncestryChanged = Model.AncestryChanged:Connect(function(Old, New) -- Ditto on the Destroying connection, but some games might try to parent characters to nil to prevent esp so this could cause problems and can be toggled.
+        if not Model:IsDescendantOf(workspace) and NewObject.RenderSettings.DestroyOnRemove or NewObject.GlobalSettings.DestroyOnRemove then
+            NewObject:Destroy()
+        end
+    end)
+
+    local Humanoid = Model:FindFirstChildOfClass("Humanoid")
+    
+    if Humanoid then
+        NewObject.Connections.Died = Humanoid.Died:Connect(function()
+            if Settings.RemoveOnDeath then
+                NewObject:Destroy()
+            end
+        end)
+    end
+    
+    NewObject.Connections.Removing = Model.AncestryChanged:Connect(function()
+        if NewObject.RenderSettings.DestroyOnRemove or NewObject.GlobalSettings.DestroyOnRemove then
+            NewObject:Destroy()
+        end
+    end)
+    
+    return NewObject
 end
 
-function RobloxESP.ToggleESP(enabled)
-    RobloxESP.Settings.Enabled = enabled == nil and not RobloxESP.Settings.Enabled or enabled
-    return RobloxESP.Settings.Enabled
+function Object:GetQuad() -- Gets a table of positions for use in pretty much every ESP function. This also returns if the player is onscreen and will not return anything in the case that they aren't.
+    local RenderSettings = self.RenderSettings
+    local GlobalSettings = self.GlobalSettings
+    
+    local MaxSize = GetValue(RenderSettings, GlobalSettings, "MaxBoxSize")
+    local BoxTopOffset = GetValue(RenderSettings, GlobalSettings, "BoxTopOffset")
+    
+    local Model = self.Model
+    local Pivot = Model:GetPivot()
+    local BoxPosition, Size = Model:GetBoundingBox()
+    
+    Pivot = Pivot * ESP:GetOffset(Model)
+    
+    Size = Size * Vector3.new(1, 1, 0) -- Thanks synapse editor for not supporting compound operators very cool (also fuck the depth).
+
+    local X, Y = math.clamp(Size.X, 1, MaxSize.X) / 2, math.clamp(Size.Y, 1, MaxSize.Y) / 2
+    
+    -- Hey check out this amazing epic readable math and very simple easy-to-type variable names.
+    -- There's some leftover code here from when I was using Vector3s instead of CFrames. If you want boxes to be locked on one axis, you can add this back. You're a sociopath if you do, though.
+    local PivotVector, PivotOnScreen = (ESP:GetScreenPosition(Pivot.Position))
+    local BoxTop = ESP:GetScreenPosition((Pivot * CFrame.new(0, Y, 0)).Position + (BoxTopOffset)) --[[+ (Size * Vector3.new(0, 1, 0) / 2) + Vector3.new(0, 1, 0)]]
+    local BoxBottom = ESP:GetScreenPosition((Pivot * CFrame.new(0, -Y, 0)).Position)
+    local TopRight, TopRightOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(-X, Y, 0)).Position) --[[+ ((Size * Vector3.new(-1, 1, 0)) / 2)]]
+    local TopLeft, TopLeftOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(X, Y, 0)).Position)--[[Pivot + (Size / 2))]]
+    local BottomLeft, BottomLeftOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(X, -Y, 0)).Position) --[[+ ((Size * Vector3.new(1, -1, 0)) / 2))]]
+    local BottomRight, BottomRightOnScreen = ESP:GetScreenPosition((Pivot * CFrame.new(-X, -Y, 0)).Position)--[[ - (Size / 2))]]
+    
+    if TopRightOnScreen or TopLeftOnScreen or BottomLeftOnScreen or BottomRightOnScreen then -- Boxes don't cause weird drawing issues if any part of the character is on-screen (only checks the bounding box, a player's arm can be slightly poking out and the box won't draw).
+        local Positions = {
+            BoxBottom = BoxBottom, -- For tracers :3.
+            Pivot = PivotVector, -- The model base because maybe I'll use it? I have no idea stop asking me these questions.
+            BoxTop = BoxTop, -- Just above the top of the model because funny nametag esp.
+            TopRight = TopRight,    -- Top Right
+            TopLeft = TopLeft,     -- Top Left
+            BottomLeft = BottomLeft,  -- Bottom Left
+            BottomRight = BottomRight, -- Bottom Right
+        }
+    
+        return Positions, true -- The player is on the screen, so the box can be drawn.
+    end
+    
+    return false -- The player is offscreen and drawing this box is going to do crazy shit, stop.
 end
 
-function RobloxESP.TogglePlayerESP(enabled)
-    RobloxESP.Settings.PlayerESP.Enabled = enabled == nil and not RobloxESP.Settings.PlayerESP.Enabled or enabled
-    return RobloxESP.Settings.PlayerESP.Enabled
-end
+function Object:DrawBox(Quad) -- Draws a box around the player based on a given quad.
+    local RenderSettings = self.RenderSettings
+    local GlobalSettings = self.GlobalSettings
+    
+    local RenderBoxes = RenderSettings.Boxes
+    local GlobalBoxes = GlobalSettings.Boxes
+    
+    local TeamColors = GetValue(RenderSettings, GlobalSettings, "TeamColors")
+    local Thickness = GetValue(RenderBoxes, GlobalBoxes, "Thickness")
+    local Color = GetValue(RenderBoxes, GlobalBoxes, "Color")
 
-function RobloxESP.ToggleBoxESP(enabled)
-    RobloxESP.Settings.BoxESP.Enabled = enabled == nil and not RobloxESP.Settings.BoxESP.Enabled or enabled
-    return RobloxESP.Settings.BoxESP.Enabled
-end
-
-function RobloxESP.ToggleHealthESP(enabled)
-    RobloxESP.Settings.HealthESP.Enabled = enabled == nil and not RobloxESP.Settings.HealthESP.Enabled or enabled
-    return RobloxESP.Settings.HealthESP.Enabled
-end
-
-function RobloxESP.ToggleDistanceESP(enabled)
-    RobloxESP.Settings.DistanceESP.Enabled = enabled == nil and not RobloxESP.Settings.DistanceESP.Enabled or enabled
-    return RobloxESP.Settings.DistanceESP.Enabled
-end
-
-function RobloxESP.ToggleNameESP(enabled)
-    RobloxESP.Settings.NameESP.Enabled = enabled == nil and not RobloxESP.Settings.NameESP.Enabled or enabled
-    return RobloxESP.Settings.NameESP.Enabled
-end
-
-function RobloxESP.ToggleChamsESP(enabled)
-    RobloxESP.Settings.ChamsESP.Enabled = enabled == nil and not RobloxESP.Settings.ChamsESP.Enabled or enabled
-    return RobloxESP.Settings.ChamsESP.Enabled
-end
-
-function RobloxESP.ToggleSkeletonESP(enabled)
-    RobloxESP.Settings.SkeletonESP.Enabled = enabled == nil and not RobloxESP.Settings.SkeletonESP.Enabled or enabled
-    return RobloxESP.Settings.SkeletonESP.Enabled
-end
-
-function RobloxESP.ToggleTracersESP(enabled)
-    RobloxESP.Settings.TracersESP.Enabled = enabled == nil and not RobloxESP.Settings.TracersESP.Enabled or enabled
-    return RobloxESP.Settings.TracersESP.Enabled
-end
-
-function RobloxESP.UpdatePlayerESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.PlayerESP[key] = value
+    local Properties = {
+        Visible = true,
+        Color = TeamColors and ESP:GetTeamColor(self.Model) or Color,
+        Thickness = Thickness,
+        PointA = Quad.TopRight,
+        PointB = Quad.TopLeft,
+        PointC = Quad.BottomLeft,
+        PointD = Quad.BottomRight,
+    }
+    
+    for Property, Value in next, Properties do
+        self.Objects.Box[Property] = Value
     end
 end
 
-function RobloxESP.UpdateBoxESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.BoxESP[key] = value
+function Object:DrawName(Quad)
+    local RenderSettings = self.RenderSettings
+    local GlobalSettings = self.GlobalSettings
+    
+    local RenderNames = RenderSettings.Names
+    local GlobalNames = GlobalSettings.Names
+    
+    
+    local Settings = RenderSettings.Names or GlobalNames
+    
+    local ShowDistance = GetValue(RenderNames, GlobalNames, "Distance")
+    local Size = GetValue(RenderNames, GlobalNames, "Size")
+    local Resize = GetValue(RenderNames, GlobalNames, "Resize")
+    local ResizeWeight = GetValue(RenderNames, GlobalNames, "ResizeWeight")
+    local ShowHealth = GetValue(RenderNames, GlobalNames, "Health")
+    local Font = GetValue(RenderNames, GlobalNames, "Font")
+    local Center = GetValue(RenderNames, GlobalNames, "Center")
+    local TeamColors = GetValue(RenderNames, GlobalNames, "TeamColors")
+    local Color = GetValue(RenderNames, GlobalNames, "Color")
+    local Outline = GetValue(RenderNames, GlobalNames, "Outline")
+    
+    local Distance = self.Model:GetPivot().Position
+    
+    local Properties = {
+        Visible = true,
+        Color = TeamColors and ESP:GetTeamColor(self.Model) or Color,
+        Outline = Outline,
+        Text = not (Size or ShowHealth) and self.Name or ("%s [%sm]%s"):format(self.Name, ShowDistance and tostring(ESP:GetDistance(Distance)) or "", ShowHealth and ("\n%d/%d (%d%%)"):format(ESP:GetHealth(self.Model)) or ""), -- My god this is an ugly string.format
+        Size = not Resize and Size or Size - math.clamp((ESP:GetDistance(Distance) * ResizeWeight), 1, Size * 0.75),
+        Font = Font,
+        Center = Center,
+        Position = Quad.BoxTop,
+    }
+
+    for Property, Value in next, Properties do
+        self.Objects.Name[Property] = Value
     end
 end
 
-function RobloxESP.UpdateHealthESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.HealthESP[key] = value
+function Object:DrawTracer(Quad)
+    local RenderSettings = self.RenderSettings
+    local GlobalSettings = self.GlobalSettings
+    
+    local RenderTracers = RenderSettings.Tracers
+    local GlobalTracers = GlobalSettings.Tracers
+    
+    local TeamColors = GetValue(RenderTracers, GlobalTracers, "TeamColors")
+    local Color = GetValue(RenderTracers, GlobalTracers, "Color")
+    local Thickness = GetValue(RenderTracers, GlobalTracers, "Thickness")
+    
+    local Properties = {
+        Visible = true,
+        Color = TeamColors and ESP:GetTeamColor(self.Model) or Color,
+        Thickness = Thickness,
+        From = workspace.CurrentCamera.ViewportSize * Vector2.new(.5, 1),
+        To = Quad.BoxBottom,
+    }
+    
+    for Property, Value in next, Properties do
+        self.Objects.Tracer[Property] = Value
     end
 end
 
-function RobloxESP.UpdateDistanceESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.DistanceESP[key] = value
+function Object:Destroy()
+    ESP.Objects[self.Model] = nil
+    self:ClearDrawings()
+    
+    for i,v in next, self.Objects do
+        v:Remove()
+    end
+    
+    for i,v in next, self.Connections do -- I could use a module like maid but I'm lazy.
+        v:Disconnect()
+    end
+    
+    table.clear(self.Objects)
+end
+
+function Object:ClearDrawings()
+    for i,v in next, self.Objects do
+        v.Visible = false
     end
 end
 
-function RobloxESP.UpdateNameESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.NameESP[key] = value
+function Object:Refresh()
+    local Model = self.Model
+    local Quad = self:GetQuad()
+    local RenderSettings = self.RenderSettings
+    local GlobalSettings = self.GlobalSettings
+    
+    local TeamBased = GetValue(RenderSettings, GlobalSettings, "TeamBased")
+    local MaxDistance = GetValue(RenderSettings, GlobalSettings, "MaxDistance")
+    local Boxes = GetValue(RenderSettings.Boxes, GlobalSettings.Boxes, "Enabled")
+    local Names = GetValue(RenderSettings.Names, GlobalSettings.Names, "Enabled")
+    local Tracers = GetValue(RenderSettings.Tracers, GlobalSettings.Tracers, "Enabled")
+    
+    if not ESP.Enabled then
+        return self:ClearDrawings() -- This is obvious and doesn't need a comment, but I am adding a comment here because it's funny.
+    end
+    
+    if not Model.Parent or not Model:IsDescendantOf(workspace) then
+        return self:ClearDrawings() -- I don't want stuff to render in nil, edit this if you don't like it pls.
+    end
+    
+    if not Quad then 
+        return self:ClearDrawings() -- Player isn't on-screen
+    end
+    
+    if TeamBased and not ESP:IsHostile(Model) then
+        return self:ClearDrawings()
+    end
+    
+    if ESP:GetDistance(Model:GetPivot().Position) > MaxDistance then
+        return self:ClearDrawings()
+    end
+    
+    if Boxes then
+        self:DrawBox(Quad)
+    else
+        self.Objects.Box.Visible = false
+    end
+    
+    if Names then
+        self:DrawName(Quad)
+    else
+        self.Objects.Name.Visible = false
+    end
+    
+    if Tracers then
+        self:DrawTracer(Quad)
+    else
+        self.Objects.Tracer.Visible = false
     end
 end
 
-function RobloxESP.UpdateChamsESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.ChamsESP[key] = value
+game.RunService.Stepped:Connect(function()
+    for i, Object in next, ESP.Objects do
+        Object:Refresh()
     end
-end
+end)
 
-function RobloxESP.UpdateSkeletonESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.SkeletonESP[key] = value
-    end
-end
-
-function RobloxESP.UpdateTracersESP(options)
-    for key, value in pairs(options) do
-        RobloxESP.Settings.TracersESP[key] = value
-    end
-end
-
-return RobloxESP
+return ESP
