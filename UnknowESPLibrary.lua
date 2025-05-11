@@ -1,20 +1,3 @@
---[[
-    Customizable Roblox ESP Library
-    Features:
-    - Name ESP
-    - Box ESP
-    - Healthbar ESP
-    - Distance ESP
-    - Chams (Player highlighting)
-    - Skeleton ESP
-    - Tracer ESP
-    
-    Instructions:
-    1. Execute this script in your exploit
-    2. Use the ESP.toggle functions to enable/disable features
-    3. Customize colors and settings as needed
---]]
-
 local ESP = {
     Enabled = true,
     
