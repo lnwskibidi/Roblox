@@ -76,6 +76,78 @@ local ESP = {
     Objects = {}
 }
 
+-- Add functions to toggle features and update settings
+function ESP:Toggle(enabled)
+    self.Enabled = enabled
+    
+    -- If turning off, clear all drawings
+    if not enabled then
+        for _, object in pairs(self.Objects) do
+            object:ClearDrawings()
+        end
+    end
+end
+
+function ESP:ToggleBox(enabled)
+    self.Settings.Boxes.Enabled = enabled
+end
+
+function ESP:ToggleNames(enabled)
+    self.Settings.Names.Enabled = enabled
+end
+
+function ESP:ToggleTracers(enabled)
+    self.Settings.Tracers.Enabled = enabled
+end
+
+function ESP:ToggleChams(enabled)
+    self.Settings.Chams.Enabled = enabled
+    
+    -- Apply changes to existing objects
+    for _, object in pairs(self.Objects) do
+        if object.Objects.Chams then
+            if enabled then
+                object:UpdateChams()
+            else
+                object.Objects.Chams.Enabled = false
+            end
+        elseif enabled then
+            -- Create chams for existing objects that don't have them
+            object.Objects.Chams = Instance.new("Highlight")
+            object.Objects.Chams.FillColor = self.Settings.Chams.Color
+            object.Objects.Chams.FillTransparency = self.Settings.Chams.Transparency
+            object.Objects.Chams.OutlineColor = self.Settings.Chams.OutlineColor
+            object.Objects.Chams.OutlineTransparency = self.Settings.Chams.OutlineTransparency
+            object.Objects.Chams.DepthMode = self.Settings.Chams.DepthMode
+            object.Objects.Chams.Adornee = object.Model
+            object.Objects.Chams.Parent = game.CoreGui
+        end
+    end
+end
+
+function ESP:ToggleSkeleton(enabled)
+    self.Settings.Skeleton.Enabled = enabled
+    
+    -- Apply changes to existing objects
+    for _, object in pairs(self.Objects) do
+        if enabled and next(object.Objects.Skeleton) == nil then
+            -- Create skeleton lines for objects that don't have them
+            local Humanoid = object.Model:FindFirstChildOfClass("Humanoid")
+            if Humanoid then
+                local Connections = Humanoid.RigType == Enum.HumanoidRigType.R6 and self.Settings.Skeleton.R6Connections or self.Settings.Skeleton.Connections
+                
+                for _, Connection in ipairs(Connections) do
+                    object.Objects.Skeleton[Connection[1] .. "-" .. Connection[2]] = Draw("Line", {
+                        Thickness = self.Settings.Skeleton.Thickness,
+                        Color = self.Settings.Skeleton.Color,
+                        Visible = false
+                    })
+                end
+            end
+        end
+    end
+end
+
 local function Draw(Type, Properties)
     local Object = Drawing.new(Type)
     
@@ -334,7 +406,6 @@ function Object:New(Model, ExtraInfo)
     return NewObject
 end
 
--- FIXED: Modified GetQuad function to properly calculate box corners that always face the camera
 function Object:GetQuad()
     local RenderSettings = self.RenderSettings
     local GlobalSettings = self.GlobalSettings
